@@ -672,6 +672,11 @@ app.get('*', (c) => {
     let paymentAccounts = [];
     let membersList = [];
     let currentSettlements = [];
+    // Helper Format VND
+    function formatVND(num) {
+      if (!num) return '0 đ';
+      return Number(num).toLocaleString('vi-VN') + ' đ';
+    }
 
     // Init Lucide
     lucide.createIcons();
