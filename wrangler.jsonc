@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lunch-bill-splitter",
+  "main": "src/index.js",
+  "compatibility_date": "2024-10-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "lunch.16092001.xyz",
+      "custom_domain": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lunch-db",
+      "database_id": "8093288b-4bdb-4c48-ad01-06deb16e7b2b"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "lunch-bills"
+    }
+  ],
+  "vars": {
+    "SCANNER_API_URL": "https://lunch-bill-splitter-api.16092001.xyz"
+  }
+}
