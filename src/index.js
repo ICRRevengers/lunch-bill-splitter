@@ -13,63 +13,136 @@ function formatVND(num) {
 }
 
 // ==============================================================================
-// AUTHENTICATION & SECURITY HELPERS
+// AUTHENTICATION & USER MANAGEMENT HELPERS (RBAC)
 // ==============================================================================
-async function getExpectedPassword(c) {
-  try {
-    const row = await c.env.DB.prepare("SELECT value FROM app_settings WHERE key = 'app_password'").first();
-    if (row && row.value) return row.value.trim();
-  } catch (e) {}
-  return (c.env.APP_PASSWORD || 'phupx1').trim();
-}
+const AUTH_SECRET = 'lunch_auth_secret_v2_2026';
 
-async function signToken(password, timestamp) {
-  const data = new TextEncoder().encode(`lunch_auth_secret_v1:${timestamp}:${password}`);
+async function hashPassword(password) {
+  const data = new TextEncoder().encode(`salt_lunch_pw_${password}_2026`);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function verifyToken(c, token) {
-  if (!token || typeof token !== 'string') return false;
-  const parts = token.split('.');
-  if (parts.length !== 2) return false;
-  const [tsStr, signature] = parts;
-  const timestamp = parseInt(tsStr, 10);
-  if (isNaN(timestamp)) return false;
-
-  // Hết hạn sau 30 ngày
-  const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-  if (Date.now() - timestamp > MAX_AGE_MS || timestamp > Date.now() + 60000) {
-    return false;
-  }
-
-  const expectedPassword = await getExpectedPassword(c);
-  const expectedSig = await signToken(expectedPassword, timestamp);
-  return signature === expectedSig;
+async function signTokenPayload(payloadObj) {
+  const payloadStr = JSON.stringify(payloadObj);
+  const b64Payload = btoa(unescape(encodeURIComponent(payloadStr)));
+  const data = new TextEncoder().encode(`${AUTH_SECRET}:${b64Payload}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const sig = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return `${b64Payload}.${sig}`;
 }
 
-async function isAuthenticated(c) {
+async function verifyToken(c, token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [b64Payload, signature] = parts;
+
+  try {
+    const data = new TextEncoder().encode(`${AUTH_SECRET}:${b64Payload}`);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const expectedSig = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    if (signature !== expectedSig) return null;
+
+    const jsonStr = decodeURIComponent(escape(atob(b64Payload)));
+    const payload = JSON.parse(jsonStr);
+
+    // Hết hạn sau 30 ngày
+    const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+    if (Date.now() - payload.timestamp > MAX_AGE_MS || payload.timestamp > Date.now() + 60000) {
+      return null;
+    }
+
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getSessionUser(c) {
   const token = getCookie(c, 'lunch_auth');
   return await verifyToken(c, token);
 }
 
+// Tự động khởi tạo bảng users và nạp tài khoản admin, guest demo mặc định
+let usersTableChecked = false;
+async function ensureUsersTableAndSeeds(db) {
+  if (usersTableChecked) return;
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'guest',
+        full_name TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run();
+
+    // 1. Tạo hoặc cập nhật tài khoản Admin phupx1
+    const adminUser = await db.prepare("SELECT id FROM users WHERE username = 'phupx1'").first();
+    const adminHash = await hashPassword('phupx1@1609');
+    if (!adminUser) {
+      await db.prepare(
+        "INSERT INTO users (username, password_hash, role, full_name) VALUES ('phupx1', ?, 'admin', 'Alviss (Admin)')"
+      ).bind(adminHash).run();
+    } else {
+      // Đảm bảo role admin và cập nhật mật khẩu phupx1@1609
+      await db.prepare("UPDATE users SET role = 'admin', password_hash = ? WHERE username = 'phupx1'").bind(adminHash).run();
+    }
+
+    // 2. Tạo tài khoản Demo haivnt1
+    const demoUser = await db.prepare("SELECT id FROM users WHERE username = 'haivnt1'").first();
+    if (!demoUser) {
+      const demoHash = await hashPassword('123456');
+      await db.prepare(
+        "INSERT INTO users (username, password_hash, role, full_name) VALUES ('haivnt1', ?, 'guest', 'Hải VN')"
+      ).bind(demoHash).run();
+    }
+
+    usersTableChecked = true;
+  } catch (err) {
+    console.error('ensureUsersTableAndSeeds error:', err);
+  }
+}
+
 // ------------------------------------------------------------------------------
-// AUTH ENDPOINTS: Login & Logout
+// AUTH ENDPOINTS: Login, Register & Logout
 // ------------------------------------------------------------------------------
 app.post('/api/login', async (c) => {
   try {
-    const { password } = await c.req.json();
+    await ensureUsersTableAndSeeds(c.env.DB);
+    const { username, password } = await c.req.json();
+    const cleanUser = (username || '').trim().toLowerCase();
     const cleanPw = (password || '').trim();
-    const expected = await getExpectedPassword(c);
 
-    if (!cleanPw || cleanPw !== expected) {
-      return c.json({ success: false, error: 'Mật khẩu không chính xác' }, 401);
+    if (!cleanUser || !cleanPw) {
+      return c.json({ success: false, error: 'Vui lòng nhập tên đăng nhập và mật khẩu' }, 400);
     }
 
-    const timestamp = Date.now();
-    const signature = await signToken(expected, timestamp);
-    const token = `${timestamp}.${signature}`;
+    const user = await c.env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(cleanUser).first();
+    if (!user) {
+      return c.json({ success: false, error: 'Tên đăng nhập hoặc mật khẩu không chính xác' }, 401);
+    }
+
+    const inputHash = await hashPassword(cleanPw);
+    if (inputHash !== user.password_hash) {
+      return c.json({ success: false, error: 'Tên đăng nhập hoặc mật khẩu không chính xác' }, 401);
+    }
+
+    const payload = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      full_name: user.full_name || user.username,
+      timestamp: Date.now(),
+    };
+
+    const token = await signTokenPayload(payload);
 
     setCookie(c, 'lunch_auth', token, {
       path: '/',
@@ -79,7 +152,68 @@ app.post('/api/login', async (c) => {
       maxAge: 30 * 24 * 60 * 60, // 30 ngày
     });
 
-    return c.json({ success: true, message: 'Đăng nhập thành công' });
+    return c.json({ success: true, message: 'Đăng nhập thành công', user: payload });
+  } catch (err) {
+    return c.json({ success: false, error: err.message }, 500);
+  }
+});
+
+app.post('/api/register', async (c) => {
+  try {
+    await ensureUsersTableAndSeeds(c.env.DB);
+    const { username, password, full_name } = await c.req.json();
+    const cleanUser = (username || '').trim().toLowerCase();
+    const cleanPw = (password || '').trim();
+    const cleanName = (full_name || '').trim();
+
+    if (!cleanUser || !cleanPw) {
+      return c.json({ success: false, error: 'Tên đăng nhập và mật khẩu không được để trống' }, 400);
+    }
+
+    if (cleanUser.length < 3) {
+      return c.json({ success: false, error: 'Tên đăng nhập phải có ít nhất 3 ký tự' }, 400);
+    }
+
+    if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUser)) {
+      return c.json({ success: false, error: 'Tên đăng nhập chỉ chứa chữ cái, số, dấu gạch dưới hoặc chấm' }, 400);
+    }
+
+    if (cleanPw.length < 6) {
+      return c.json({ success: false, error: 'Mật khẩu phải có độ dài từ 6 ký tự trở lên' }, 400);
+    }
+
+    const existing = await c.env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(cleanUser).first();
+    if (existing) {
+      return c.json({ success: false, error: 'Tên đăng nhập này đã được đăng ký' }, 400);
+    }
+
+    // Luôn luôn tạo với quyền guest (chỉ tài khoản phupx1 được cấp admin)
+    const role = 'guest';
+    const passwordHash = await hashPassword(cleanPw);
+
+    const info = await c.env.DB.prepare(
+      'INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, ?, ?)'
+    ).bind(cleanUser, passwordHash, role, cleanName || cleanUser).run();
+
+    const payload = {
+      id: info.meta.last_row_id,
+      username: cleanUser,
+      role: role,
+      full_name: cleanName || cleanUser,
+      timestamp: Date.now(),
+    };
+
+    const token = await signTokenPayload(payload);
+
+    setCookie(c, 'lunch_auth', token, {
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      maxAge: 30 * 24 * 60 * 60,
+    });
+
+    return c.json({ success: true, message: 'Đăng ký tài khoản thành công', user: payload });
   } catch (err) {
     return c.json({ success: false, error: err.message }, 500);
   }
@@ -90,24 +224,99 @@ app.post('/api/logout', async (c) => {
   return c.json({ success: true, message: 'Đã đăng xuất' });
 });
 
+// Endpoint trả về thông tin user hiện tại
+app.get('/api/me', async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ success: false, error: 'Chưa đăng nhập' }, 401);
+  return c.json({ success: true, user });
+});
+
+// API Quản lý danh sách Users (Chỉ dành riêng cho Admin)
+app.get('/api/users', async (c) => {
+  const user = await getSessionUser(c);
+  if (!user || user.role !== 'admin') {
+    return c.json({ success: false, error: 'Forbidden: Bạn không có quyền quản lý người dùng' }, 403);
+  }
+  try {
+    const { results } = await c.env.DB.prepare(
+      'SELECT id, username, role, full_name, created_at FROM users ORDER BY role ASC, id ASC'
+    ).all();
+    return c.json({ success: true, data: results });
+  } catch (err) {
+    return c.json({ success: false, error: err.message }, 500);
+  }
+});
+
+app.delete('/api/users/:id', async (c) => {
+  const user = await getSessionUser(c);
+  if (!user || user.role !== 'admin') {
+    return c.json({ success: false, error: 'Forbidden: Bạn không có quyền xóa người dùng' }, 403);
+  }
+  try {
+    const id = c.req.param('id');
+    const target = await c.env.DB.prepare('SELECT username, role FROM users WHERE id = ?').bind(id).first();
+    if (!target) return c.json({ success: false, error: 'Tài khoản không tồn tại' }, 404);
+    if (target.role === 'admin' || target.username === 'phupx1') {
+      return c.json({ success: false, error: 'Không thể xóa tài khoản Admin hệ thống' }, 400);
+    }
+    await c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id).run();
+    return c.json({ success: true, message: 'Đã xóa người dùng' });
+  } catch (err) {
+    return c.json({ success: false, error: err.message }, 500);
+  }
+});
+
 // ------------------------------------------------------------------------------
-// MIDDLEWARE: Khóa toàn bộ /api/* (trừ login, logout, và lấy ảnh QR thanh toán)
+// MIDDLEWARE: Khóa /api/* và kiểm tra phân quyền RBAC
 // ------------------------------------------------------------------------------
 app.use('/api/*', async (c, next) => {
   const path = c.req.path;
+  const method = c.req.method;
+
+  // 1. Cho phép Public APIs
   if (
     path === '/api/login' ||
+    path === '/api/register' ||
     path === '/api/logout' ||
     (path.startsWith('/api/payment-accounts/') && path.endsWith('/qr'))
   ) {
     return await next();
   }
 
-  if (!await isAuthenticated(c)) {
+  // 2. Kiểm tra Authentication
+  const sessionUser = await getSessionUser(c);
+  if (!sessionUser) {
     return c.json({
       success: false,
-      error: 'Unauthorized: Bạn cần nhập mật khẩu để thực hiện thao tác này',
+      error: 'Unauthorized: Bạn cần đăng nhập để thực hiện thao tác này',
     }, 401);
+  }
+
+  // Gắn sessionUser vào context Hono để tiện dùng
+  c.set('sessionUser', sessionUser);
+
+  // 3. Phân quyền RBAC (Role-Based Access Control):
+  // Admin được làm mọi thứ.
+  // Guest chỉ được:
+  // - POST /api/scan
+  // - POST /api/notify
+  // - GET /api/members (chỉ đọc)
+  // - GET /api/payment-accounts (chỉ đọc)
+  // - GET /api/me
+  if (sessionUser.role !== 'admin') {
+    const isGuestAllowed =
+      (path === '/api/scan' && method === 'POST') ||
+      (path === '/api/notify' && method === 'POST') ||
+      (path === '/api/members' && method === 'GET') ||
+      (path === '/api/payment-accounts' && method === 'GET') ||
+      (path === '/api/me' && method === 'GET');
+
+    if (!isGuestAllowed) {
+      return c.json({
+        success: false,
+        error: 'Forbidden: Bạn chỉ có quyền Guest. Không được phép chỉnh sửa danh bạ, tài khoản ngân hàng hoặc cài đặt hệ thống!',
+      }, 403);
+    }
   }
 
   return await next();
@@ -314,6 +523,11 @@ app.post('/api/settings', async (c) => {
   try {
     const body = await c.req.json();
     for (const [k, v] of Object.entries(body)) {
+      if (k === 'app_password' && v) {
+        // Cập nhật mật khẩu tài khoản Admin phupx1 trong bảng users
+        const newHash = await hashPassword(String(v).trim());
+        await c.env.DB.prepare("UPDATE users SET password_hash = ? WHERE username = 'phupx1'").bind(newHash).run();
+      }
       await c.env.DB.prepare(
         `INSERT INTO app_settings (key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
@@ -475,7 +689,7 @@ app.post('/api/notify', async (c) => {
 });
 
 // ==============================================================================
-// 6. FRONTEND: LOGIN PAGE & MAIN WEB APP
+// 6. FRONTEND: LOGIN & REGISTER PAGE & MAIN WEB APP
 // ==============================================================================
 function renderLoginPage() {
   return `<!DOCTYPE html>
@@ -483,7 +697,7 @@ function renderLoginPage() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Đăng Nhập — Lunch Bill Splitter</title>
+  <title>Đăng Nhập / Đăng Ký — Lunch Bill Splitter</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script>
@@ -503,9 +717,17 @@ function renderLoginPage() {
       }
     }
   </script>
+  <style>
+    .auth-tab.active {
+      background-color: #ffffff;
+      color: #ea580c;
+      font-weight: 700;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+  </style>
 </head>
 <body class="bg-gradient-to-br from-slate-100 via-orange-50/40 to-slate-100 text-slate-800 min-h-screen flex items-center justify-center p-4 font-sans antialiased">
-  <div class="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200 shadow-xl space-y-6">
+  <div class="max-w-md w-full bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl space-y-6">
     <div class="text-center space-y-2">
       <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-amber-500 mx-auto flex items-center justify-center text-white shadow-lg shadow-brand-500/30">
         <i data-lucide="receipt" class="w-7 h-7"></i>
@@ -514,26 +736,104 @@ function renderLoginPage() {
       <p class="text-xs text-slate-500">Hệ thống bóc tách hóa đơn & chia tiền ăn trưa nội bộ</p>
     </div>
 
-    <form onsubmit="handleLogin(event)" class="space-y-4">
-      <div id="login-error" class="hidden p-3 bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl flex items-center space-x-2">
-        <i data-lucide="alert-circle" class="w-4 h-4 shrink-0"></i>
-        <span id="login-error-msg">Mật khẩu không chính xác!</span>
+    <!-- Auth Tabs Switcher -->
+    <div class="bg-slate-100 p-1 rounded-2xl grid grid-cols-2 text-xs sm:text-sm font-medium text-slate-500">
+      <button type="button" id="tab-btn-login" onclick="switchAuthTab('login')" class="auth-tab active py-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer">
+        <i data-lucide="log-in" class="w-4 h-4"></i>
+        <span>Đăng Nhập</span>
+      </button>
+      <button type="button" id="tab-btn-register" onclick="switchAuthTab('register')" class="auth-tab py-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer">
+        <i data-lucide="user-plus" class="w-4 h-4"></i>
+        <span>Đăng Ký Mới</span>
+      </button>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="auth-alert" class="hidden p-3 rounded-xl text-xs flex items-center space-x-2">
+      <i id="auth-alert-icon" data-lucide="alert-circle" class="w-4 h-4 shrink-0"></i>
+      <span id="auth-alert-msg"></span>
+    </div>
+
+    <!-- FORM 1: LOGIN -->
+    <form id="form-login" onsubmit="handleLogin(event)" class="space-y-4">
+      <div class="space-y-1.5">
+        <label for="login-username" class="block text-xs font-semibold text-slate-700">Tên đăng nhập</label>
+        <div class="relative">
+          <input type="text" id="login-username" required autofocus placeholder="Ví dụ: phupx1 hoặc haivnt1" class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all lowercase">
+          <i data-lucide="user" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
+        </div>
       </div>
 
       <div class="space-y-1.5">
-        <label for="password" class="block text-xs font-semibold text-slate-700">Mật khẩu truy cập</label>
+        <label for="login-password" class="block text-xs font-semibold text-slate-700">Mật khẩu</label>
         <div class="relative">
-          <input type="password" id="password" required autofocus placeholder="Nhập mật khẩu..." class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pr-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
-          <button type="button" onclick="togglePasswordVisibility()" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer">
-            <i id="eye-icon" data-lucide="eye" class="w-4 h-4"></i>
+          <input type="password" id="login-password" required placeholder="Nhập mật khẩu của bạn..." class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 pr-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
+          <i data-lucide="lock" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
+          <button type="button" onclick="togglePasswordVisibility('login-password', 'login-eye-icon')" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer">
+            <i id="login-eye-icon" data-lucide="eye" class="w-4 h-4"></i>
           </button>
         </div>
       </div>
 
       <button type="submit" id="btn-login" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-semibold py-3 rounded-xl text-sm shadow-md shadow-brand-600/25 transition-all flex items-center justify-center space-x-2 cursor-pointer">
         <i data-lucide="lock-open" class="w-4 h-4"></i>
-        <span>Mở Khóa Truy Cập</span>
+        <span>Đăng Nhập</span>
       </button>
+
+      <div class="p-3 bg-amber-50/70 rounded-xl border border-amber-200/60 text-[11px] text-amber-800 space-y-1">
+        <p class="font-semibold flex items-center space-x-1">
+          <i data-lucide="info" class="w-3.5 h-3.5 text-amber-600"></i>
+          <span>Tài khoản Demo dành cho Guest:</span>
+        </p>
+        <p>Tên đăng nhập: <code class="bg-amber-100/80 px-1 py-0.5 rounded font-mono font-bold">haivnt1</code> — Pass: <code class="bg-amber-100/80 px-1 py-0.5 rounded font-mono font-bold">123456</code></p>
+      </div>
+    </form>
+
+    <!-- FORM 2: REGISTER -->
+    <form id="form-register" onsubmit="handleRegister(event)" class="hidden space-y-4">
+      <div class="space-y-1.5">
+        <label for="reg-username" class="block text-xs font-semibold text-slate-700">Tên đăng nhập mới (viết liền không dấu)</label>
+        <div class="relative">
+          <input type="text" id="reg-username" required placeholder="Ví dụ: namnv2, linhnt..." class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all lowercase">
+          <i data-lucide="at-sign" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
+        </div>
+      </div>
+
+      <div class="space-y-1.5">
+        <label for="reg-fullname" class="block text-xs font-semibold text-slate-700">Họ và tên của bạn</label>
+        <div class="relative">
+          <input type="text" id="reg-fullname" required placeholder="Ví dụ: Nguyễn Văn Nam" class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
+          <i data-lucide="user" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
+        </div>
+      </div>
+
+      <div class="space-y-1.5">
+        <label for="reg-password" class="block text-xs font-semibold text-slate-700">Mật khẩu (tối thiểu 6 ký tự)</label>
+        <div class="relative">
+          <input type="password" id="reg-password" required minlength="6" placeholder="Tạo mật khẩu..." class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 pr-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
+          <i data-lucide="key" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
+          <button type="button" onclick="togglePasswordVisibility('reg-password', 'reg-eye-icon')" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer">
+            <i id="reg-eye-icon" data-lucide="eye" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="space-y-1.5">
+        <label for="reg-password-confirm" class="block text-xs font-semibold text-slate-700">Nhập lại mật khẩu</label>
+        <div class="relative">
+          <input type="password" id="reg-password-confirm" required minlength="6" placeholder="Xác nhận lại mật khẩu..." class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
+          <i data-lucide="check-circle" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
+        </div>
+      </div>
+
+      <button type="submit" id="btn-register" class="w-full bg-slate-900 hover:bg-black text-white font-semibold py-3 rounded-xl text-sm shadow-md transition-all flex items-center justify-center space-x-2 cursor-pointer">
+        <i data-lucide="user-plus" class="w-4 h-4"></i>
+        <span>Đăng Ký Tài Khoản</span>
+      </button>
+
+      <p class="text-[11px] text-slate-400 text-center leading-relaxed">
+        Tài khoản mới đăng ký sẽ thuộc quyền <b>Guest</b> (được phép scan bill, chia tiền và gửi email).
+      </p>
     </form>
 
     <div class="text-center pt-2">
@@ -546,9 +846,48 @@ function renderLoginPage() {
 
   <script>
     lucide.createIcons();
-    function togglePasswordVisibility() {
-      const input = document.getElementById('password');
-      const icon = document.getElementById('eye-icon');
+
+    function switchAuthTab(mode) {
+      clearAlert();
+      const tabLogin = document.getElementById('tab-btn-login');
+      const tabReg = document.getElementById('tab-btn-register');
+      const formLogin = document.getElementById('form-login');
+      const formReg = document.getElementById('form-register');
+
+      if (mode === 'login') {
+        tabLogin.classList.add('active');
+        tabReg.classList.remove('active');
+        formLogin.classList.remove('hidden');
+        formReg.classList.add('hidden');
+        document.getElementById('login-username').focus();
+      } else {
+        tabReg.classList.add('active');
+        tabLogin.classList.remove('active');
+        formReg.classList.remove('hidden');
+        formLogin.classList.add('hidden');
+        document.getElementById('reg-username').focus();
+      }
+      lucide.createIcons();
+    }
+
+    function showAlert(msg, isSuccess = false) {
+      const box = document.getElementById('auth-alert');
+      const text = document.getElementById('auth-alert-msg');
+      text.textContent = msg;
+      box.className = 'p-3 rounded-xl text-xs flex items-center space-x-2 ' +
+        (isSuccess ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-red-50 border border-red-200 text-red-600');
+      box.classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function clearAlert() {
+      const box = document.getElementById('auth-alert');
+      box.classList.add('hidden');
+    }
+
+    function togglePasswordVisibility(inputId, iconId) {
+      const input = document.getElementById(inputId);
+      const icon = document.getElementById(iconId);
       if (input.type === 'password') {
         input.type = 'text';
         icon.setAttribute('data-lucide', 'eye-off');
@@ -561,37 +900,84 @@ function renderLoginPage() {
 
     async function handleLogin(e) {
       e.preventDefault();
-      const pwInput = document.getElementById('password');
-      const errBox = document.getElementById('login-error');
-      const errMsg = document.getElementById('login-error-msg');
+      clearAlert();
+      const uInput = document.getElementById('login-username');
+      const pwInput = document.getElementById('login-password');
       const btn = document.getElementById('btn-login');
 
-      errBox.classList.add('hidden');
       btn.disabled = true;
-      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Đang xác thực...</span>';
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Đang đăng nhập...</span>';
       lucide.createIcons();
 
       try {
         const res = await fetch('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: pwInput.value.trim() }),
+          body: JSON.stringify({
+            username: uInput.value.trim(),
+            password: pwInput.value.trim(),
+          }),
         });
         const data = await res.json();
         if (data.success) {
           window.location.reload();
         } else {
-          errMsg.textContent = data.error || 'Mật khẩu không đúng!';
-          errBox.classList.remove('hidden');
+          showAlert(data.error || 'Tên đăng nhập hoặc mật khẩu không đúng!');
           pwInput.focus();
           pwInput.select();
         }
       } catch (err) {
-        errMsg.textContent = 'Lỗi kết nối máy chủ: ' + err.message;
-        errBox.classList.remove('hidden');
+        showAlert('Lỗi kết nối máy chủ: ' + err.message);
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<i data-lucide="lock-open" class="w-4 h-4"></i><span>Mở Khóa Truy Cập</span>';
+        btn.innerHTML = '<i data-lucide="lock-open" class="w-4 h-4"></i><span>Đăng Nhập</span>';
+        lucide.createIcons();
+      }
+    }
+
+    async function handleRegister(e) {
+      e.preventDefault();
+      clearAlert();
+      const uInput = document.getElementById('reg-username');
+      const nameInput = document.getElementById('reg-fullname');
+      const pwInput = document.getElementById('reg-password');
+      const cfInput = document.getElementById('reg-password-confirm');
+      const btn = document.getElementById('btn-register');
+
+      if (pwInput.value !== cfInput.value) {
+        showAlert('Mật khẩu nhập lại không khớp!');
+        cfInput.focus();
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Đang tạo tài khoản...</span>';
+      lucide.createIcons();
+
+      try {
+        const res = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: uInput.value.trim(),
+            full_name: nameInput.value.trim(),
+            password: pwInput.value.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert('Đăng ký thành công! Đang vào ứng dụng...', true);
+          setTimeout(() => {
+            window.location.reload();
+          }, 600);
+        } else {
+          showAlert(data.error || 'Không thể đăng ký tài khoản!');
+        }
+      } catch (err) {
+        showAlert('Lỗi kết nối máy chủ: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="user-plus" class="w-4 h-4"></i><span>Đăng Ký Tài Khoản</span>';
         lucide.createIcons();
       }
     }
@@ -601,9 +987,16 @@ function renderLoginPage() {
 }
 
 app.get('*', async (c) => {
-  if (!await isAuthenticated(c)) {
+  await ensureUsersTableAndSeeds(c.env.DB);
+  const sessionUser = await getSessionUser(c);
+  if (!sessionUser) {
     return c.html(renderLoginPage());
   }
+
+  const isAdmin = sessionUser.role === 'admin';
+  const displayName = sessionUser.full_name || sessionUser.username;
+  const username = sessionUser.username;
+  const roleName = isAdmin ? 'Admin' : 'Guest';
 
   return c.html(`<!DOCTYPE html>
 <html lang="vi">
@@ -644,17 +1037,21 @@ app.get('*', async (c) => {
   <!-- Header -->
   <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
     <div class="max-w-5xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
-      <!-- Top Row on Mobile: Logo & App Title + Logout Button -->
+      <!-- Top Row on Mobile: Logo & App Title + User info + Logout Button -->
       <div class="flex items-center justify-between w-full sm:w-auto">
         <div class="flex items-center space-x-2.5">
           <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-amber-500 flex items-center justify-center text-white shadow-md shadow-brand-500/20 shrink-0">
             <i data-lucide="receipt" class="w-5 h-5"></i>
           </div>
           <div>
-            <h1 class="text-base sm:text-lg font-bold text-slate-900 leading-tight">Lunch Bill Splitter</h1>
+            <div class="flex items-center space-x-1.5">
+              <h1 class="text-base sm:text-lg font-bold text-slate-900 leading-tight">Lunch Bill Splitter</h1>
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${isAdmin ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
+                ${isAdmin ? '👑 ADMIN' : '👤 GUEST'}
+              </span>
+            </div>
             <p class="text-[11px] sm:text-xs text-slate-500 flex items-center space-x-1">
-              <span>By Alviss</span>
-              <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <span>Xin chào, <b>${displayName}</b> (${username})</span>
             </p>
           </div>
         </div>
@@ -668,19 +1065,21 @@ app.get('*', async (c) => {
 
       <!-- Navigation Tabs & Desktop Logout -->
       <div class="flex items-center space-x-2 w-full sm:w-auto">
-        <nav class="grid grid-cols-3 sm:flex space-x-1 bg-slate-100 p-1 rounded-xl text-xs sm:text-sm font-medium w-full sm:w-auto">
-          <button onclick="switchTab('splitter')" id="tab-btn-splitter" class="tab-btn active px-2 sm:px-3.5 py-1.5 rounded-lg transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer">
+        <nav class="flex space-x-1 bg-slate-100 p-1 rounded-xl text-xs sm:text-sm font-medium w-full sm:w-auto">
+          <button onclick="switchTab('splitter')" id="tab-btn-splitter" class="tab-btn active px-2 sm:px-3.5 py-1.5 rounded-lg transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer flex-1 sm:flex-initial">
             <i data-lucide="calculator" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
             <span>Bill Split</span>
           </button>
-          <button onclick="switchTab('members')" id="tab-btn-members" class="tab-btn px-2 sm:px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer">
+          ${isAdmin ? `
+          <button onclick="switchTab('members')" id="tab-btn-members" class="tab-btn px-2 sm:px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer flex-1 sm:flex-initial">
             <i data-lucide="users" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
             <span>Accounts</span>
           </button>
-          <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn px-2 sm:px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer">
+          <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn px-2 sm:px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer flex-1 sm:flex-initial">
             <i data-lucide="settings" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
             <span>Settings</span>
           </button>
+          ` : ''}
         </nav>
 
         <!-- Logout button on desktop -->
@@ -1085,9 +1484,9 @@ app.get('*', async (c) => {
         <div>
           <h2 class="text-base font-semibold text-slate-900 flex items-center space-x-2">
             <i data-lucide="shield-check" class="w-5 h-5 text-brand-600"></i>
-            <span>Mật Khẩu Truy Cập Ứng Dụng</span>
+            <span>Mật Khẩu Quản Trị Hệ Thống (phupx1)</span>
           </h2>
-          <p class="text-xs text-slate-500 mt-0.5">Mật khẩu dùng để mở khóa web app và bảo vệ các tính năng scan AI, gửi mail.</p>
+          <p class="text-xs text-slate-500 mt-0.5">Đổi mật khẩu cho tài khoản Admin chính của bạn.</p>
         </div>
 
         <div class="space-y-4 max-w-md">
@@ -1098,9 +1497,45 @@ app.get('*', async (c) => {
           <div class="flex justify-start space-x-3 pt-1">
             <button type="button" onclick="changeAppPassword()" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer shadow-sm">
               <i data-lucide="key" class="w-3.5 h-3.5"></i>
-              <span>Cập Nhật Mật Khẩu</span>
+              <span>Cập Nhật Mật Khẩu Admin</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- User Management (Admin Only) -->
+      <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base font-semibold text-slate-900 flex items-center space-x-2">
+              <i data-lucide="users-round" class="w-5 h-5 text-brand-600"></i>
+              <span>Danh Sách Tài Khoản Người Dùng (Users)</span>
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">Tất cả tài khoản đăng nhập vào tool (Admin & Guest).</p>
+          </div>
+          <button type="button" onclick="loadUsersList()" class="self-start sm:self-auto text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center space-x-1 cursor-pointer">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+            <span>Làm mới danh sách</span>
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th class="p-3">Tên đăng nhập</th>
+                <th class="p-3">Họ tên hiển thị</th>
+                <th class="p-3 text-center">Vai trò</th>
+                <th class="p-3 text-slate-400">Ngày tạo</th>
+                <th class="p-3 w-16 text-center">Xóa</th>
+              </tr>
+            </thead>
+            <tbody id="users-list-tbody" class="divide-y divide-slate-100">
+              <tr>
+                <td colspan="5" class="p-4 text-center text-xs text-slate-400">Đang tải danh sách tài khoản...</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -1189,18 +1624,25 @@ app.get('*', async (c) => {
     // Tab switcher
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.getElementById('tab-btn-' + tabId).classList.add('active');
+      const activeBtn = document.getElementById('tab-btn-' + tabId);
+      if (activeBtn) activeBtn.classList.add('active');
 
-      document.getElementById('tab-splitter').classList.add('hidden');
-      document.getElementById('tab-members').classList.add('hidden');
-      document.getElementById('tab-settings').classList.add('hidden');
+      const tabSplitter = document.getElementById('tab-splitter');
+      const tabMembers = document.getElementById('tab-members');
+      const tabSettings = document.getElementById('tab-settings');
 
-      document.getElementById('tab-' + tabId).classList.remove('hidden');
+      if (tabSplitter) tabSplitter.classList.add('hidden');
+      if (tabMembers) tabMembers.classList.add('hidden');
+      if (tabSettings) tabSettings.classList.add('hidden');
+
+      const targetTab = document.getElementById('tab-' + tabId);
+      if (targetTab) targetTab.classList.remove('hidden');
 
       if (tabId === 'members') loadMembers();
       if (tabId === 'settings') {
         loadPaymentAccounts();
         loadSettings();
+        loadUsersList();
       }
     }
 
@@ -2205,9 +2647,72 @@ app.get('*', async (c) => {
       }
     }
 
-    // Initial Load
-    loadPaymentAccounts();
-    loadMembers();
+    async function loadUsersList() {
+      const tbody = document.getElementById('users-list-tbody');
+      if (!tbody) return;
+      tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-400">Đang tải danh sách tài khoản...</td></tr>';
+      try {
+        const res = await fetch('/api/users');
+        const data = await res.json();
+        if (!data.success) {
+          tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-xs text-red-500">${data.error || 'Không tải được danh sách'}</td></tr>`;
+          return;
+        }
+
+        if (!data.data || !data.data.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-400">Chưa có người dùng nào</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.data.map(u => {
+          const isUAdmin = u.role === 'admin';
+          const roleBadge = isUAdmin
+            ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">👑 Admin</span>'
+            : '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">👤 Guest</span>';
+          const deleteBtn = isUAdmin || u.username === 'phupx1'
+            ? '<span class="text-xs text-slate-300 cursor-not-allowed" title="Không thể xóa Admin">—</span>'
+            : `<button type="button" onclick="deleteUser(${u.id}, '${u.username}')" class="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer" title="Xóa tài khoản">
+                 <i data-lucide="trash-2" class="w-4 h-4"></i>
+               </button>`;
+          return `
+            <tr class="hover:bg-slate-50/70 transition-colors">
+              <td class="p-3 font-mono font-semibold text-slate-800">${u.username}</td>
+              <td class="p-3 text-slate-700">${u.full_name || '—'}</td>
+              <td class="p-3 text-center">${roleBadge}</td>
+              <td class="p-3 text-xs text-slate-400">${u.created_at ? u.created_at.split(' ')[0] : '—'}</td>
+              <td class="p-3 text-center">${deleteBtn}</td>
+            </tr>
+          `;
+        }).join('');
+        lucide.createIcons();
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-xs text-red-500">Lỗi kết nối: ${err.message}</td></tr>`;
+      }
+    }
+
+    async function deleteUser(id, username) {
+      if (!confirm(`Bạn có chắc chắn muốn xóa tài khoản "${username}"?`)) return;
+      try {
+        const res = await fetch('/api/users/' + id, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Đã xóa tài khoản "${username}"`);
+          loadUsersList();
+        } else {
+          alert('Lỗi: ' + (data.error || 'Không thể xóa'));
+        }
+      } catch (err) {
+        alert('Lỗi: ' + err.message);
+      }
+    }
+
+    // Initial Load (Chỉ tải các module nếu phần tử tồn tại trong DOM của role hiện tại)
+    if (document.getElementById('payment-accounts-list')) {
+      loadPaymentAccounts();
+    }
+    if (document.getElementById('members-list-tbody')) {
+      loadMembers();
+    }
   </script>
 </body>
 </html>`);
