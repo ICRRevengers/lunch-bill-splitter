@@ -604,41 +604,46 @@ app.get('*', (c) => {
       <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-5">
         <div class="flex items-center justify-between">
           <div>
-            <h2 class="text-base font-semibold text-slate-900">Tài Khoản Ngân Hàng (VietQR)</h2>
+            <h2 class="text-base font-semibold text-slate-900">Tài Khoản Thanh Toán (Ví MoMo & Ngân Hàng VietQR)</h2>
             <p class="text-xs text-slate-500 mt-0.5">Lưu trong D1, tự động đồng bộ trên tất cả thiết bị của bạn.</p>
           </div>
         </div>
 
         <form onsubmit="addPaymentAccount(event)" class="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200/70">
           <div>
-            <label class="block text-xs font-medium text-slate-500 mb-1">Ngân hàng</label>
-            <select id="acc-bank-code" required class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-500">
-              <option value="MB">MBBank (Quân Đội)</option>
-              <option value="TCB">Techcombank</option>
-              <option value="VCB">Vietcombank</option>
-              <option value="TPB">TPBank</option>
-              <option value="VPB">VPBank</option>
-              <option value="ACB">ACB</option>
-              <option value="BIDV">BIDV</option>
-              <option value="VIB">VIB</option>
-              <option value="VBA">Agribank</option>
-              <option value="MSB">MSB</option>
-              <option value="OCB">OCB</option>
-              <option value="STB">Sacombank</option>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Phương thức / Ngân hàng</label>
+            <select id="acc-bank-code" onchange="onBankSelectChange()" required class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-500">
+              <optgroup label="Ví điện tử">
+                <option value="MOMO" selected>Ví MoMo (Mã Napas 971025)</option>
+              </optgroup>
+              <optgroup label="Ngân hàng VietQR">
+                <option value="MB">MBBank (Quân Đội)</option>
+                <option value="TCB">Techcombank</option>
+                <option value="VCB">Vietcombank</option>
+                <option value="TPB">TPBank</option>
+                <option value="VPB">VPBank</option>
+                <option value="ACB">ACB</option>
+                <option value="BIDV">BIDV</option>
+                <option value="VIB">VIB</option>
+                <option value="VBA">Agribank</option>
+                <option value="MSB">MSB</option>
+                <option value="OCB">OCB</option>
+                <option value="STB">Sacombank</option>
+              </optgroup>
             </select>
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-500 mb-1">Số tài khoản</label>
-            <input type="text" id="acc-no" placeholder="Ví dụ: 0987654321" required class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-500">
+            <label id="lbl-acc-no" class="block text-xs font-medium text-slate-500 mb-1">Số điện thoại MoMo</label>
+            <input type="text" id="acc-no" placeholder="Ví dụ: 03066416402" required class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-500">
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-500 mb-1">Tên chủ tài khoản</label>
-            <input type="text" id="acc-holder" placeholder="NGUYEN VAN A" required class="w-full text-sm uppercase border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-500">
+            <label id="lbl-acc-holder" class="block text-xs font-medium text-slate-500 mb-1">Tên chủ tài khoản / ví</label>
+            <input type="text" id="acc-holder" placeholder="PHAM XUAN PHU" required class="w-full text-sm uppercase border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-500">
           </div>
           <div class="flex items-end">
             <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5 cursor-pointer">
               <i data-lucide="plus" class="w-4 h-4"></i>
-              <span>Thêm STK</span>
+              <span>Thêm Tài Khoản</span>
             </button>
           </div>
         </form>
@@ -677,19 +682,26 @@ app.get('*', (c) => {
 
   </main>
 
-  <!-- VietQR Modal -->
-  <div id="qr-modal" class="hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 text-center shadow-xl">
+  <!-- Payment & QR Modal -->
+  <div id="qr-modal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl my-auto animate-in fade-in zoom-in-95 duration-150">
       <div class="flex justify-between items-center border-b border-slate-100 pb-3">
-        <h3 id="qr-modal-title" class="font-bold text-slate-900 text-base">Thanh Toán VietQR</h3>
-        <button type="button" onclick="closeQrModal()" class="text-slate-400 hover:text-slate-600 cursor-pointer">
+        <div id="qr-modal-title" class="font-bold text-slate-900 text-base">Thanh Toán</div>
+        <button type="button" onclick="closeQrModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
-      <img id="qr-modal-img" src="" alt="Mã VietQR" class="mx-auto rounded-xl border border-slate-200 shadow-sm w-64 h-64 object-contain">
-      <div id="qr-modal-info" class="text-xs text-slate-600 bg-slate-50 p-3 rounded-lg text-left space-y-1"></div>
-      <button type="button" onclick="closeQrModal()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2 rounded-xl text-sm cursor-pointer">
-        Đóng
+      
+      <div class="relative bg-slate-50 p-2 rounded-xl border border-slate-100 flex items-center justify-center">
+        <img id="qr-modal-img" src="" alt="Mã QR Thanh Toán" class="rounded-lg w-56 h-56 object-contain shadow-sm bg-white">
+      </div>
+
+      <div id="qr-modal-info" class="text-xs text-slate-700 bg-slate-50 p-3.5 rounded-xl border border-slate-100 space-y-1.5"></div>
+
+      <div id="qr-modal-actions" class="space-y-2 pt-1"></div>
+
+      <button type="button" onclick="closeQrModal()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 rounded-xl text-sm transition-colors cursor-pointer">
+        Đóng Cửa Sổ
       </button>
     </div>
   </div>
@@ -1007,10 +1019,14 @@ app.get('*', (c) => {
       const userCount = users.length || 1;
       const sharedFeePerPerson = Math.round((shippingNet + serviceFee) / userCount);
 
-      // Lấy tài khoản ngân hàng được chọn
+      // Lấy tài khoản thanh toán được chọn
       const accSelect = document.getElementById('select-payment-account');
       const selectedAccId = accSelect ? accSelect.value : null;
       const bankAcc = paymentAccounts.find(a => String(a.id) === String(selectedAccId)) || paymentAccounts[0] || {};
+
+      const isMomo = (bankAcc.bank_code || '').toUpperCase() === 'MOMO' || bankAcc.bank_code === '971025' || ((bankAcc.bank_name || '').toUpperCase().indexOf('MOMO') !== -1);
+      const bankCodeForQr = isMomo ? '971025' : (bankAcc.bank_code || 'MB');
+      const momoLink = isMomo && bankAcc.account_no ? \`https://me.momo.vn/\${bankAcc.account_no}\` : '';
 
       let calculatedSum = 0;
       currentSettlements = users.map(u => {
@@ -1021,7 +1037,7 @@ app.get('*', (c) => {
         let roundedPay = Math.round(rawPay / 1000) * 1000;
         calculatedSum += roundedPay;
 
-        const vietqrUrl = bankAcc.account_no ? \`https://img.vietqr.io/image/\${bankAcc.bank_code}-\${bankAcc.account_no}-compact2.png?amount=\${roundedPay}&addInfo=\${encodeURIComponent('AN TRUA ' + u.name)}&accountName=\${encodeURIComponent(bankAcc.account_holder || '')}\` : '';
+        const vietqrUrl = bankAcc.account_no ? \`https://img.vietqr.io/image/\${bankCodeForQr}-\${bankAcc.account_no}-compact2.png?amount=\${roundedPay}&addInfo=\${encodeURIComponent('AN TRUA ' + u.name)}&accountName=\${encodeURIComponent(bankAcc.account_holder || '')}\` : '';
 
         return {
           name: u.name,
@@ -1033,6 +1049,8 @@ app.get('*', (c) => {
           finalAmount: roundedPay,
           vietqrUrl,
           bankInfo: bankAcc,
+          isMomo: isMomo,
+          momoLink: momoLink,
         };
       });
 
@@ -1042,7 +1060,7 @@ app.get('*', (c) => {
         if (diff !== 0 && Math.abs(diff) < 10000) {
           currentSettlements[0].finalAmount += diff;
           if (currentSettlements[0].vietqrUrl && bankAcc.account_no) {
-            currentSettlements[0].vietqrUrl = \`https://img.vietqr.io/image/\${bankAcc.bank_code}-\${bankAcc.account_no}-compact2.png?amount=\${currentSettlements[0].finalAmount}&addInfo=\${encodeURIComponent('AN TRUA ' + currentSettlements[0].name)}&accountName=\${encodeURIComponent(bankAcc.account_holder || '')}\`;
+            currentSettlements[0].vietqrUrl = \`https://img.vietqr.io/image/\${bankCodeForQr}-\${bankAcc.account_no}-compact2.png?amount=\${currentSettlements[0].finalAmount}&addInfo=\${encodeURIComponent('AN TRUA ' + currentSettlements[0].name)}&accountName=\${encodeURIComponent(bankAcc.account_holder || '')}\`;
           }
         }
       }
@@ -1057,6 +1075,25 @@ app.get('*', (c) => {
 
       currentSettlements.forEach((s, idx) => {
         sum += s.finalAmount;
+        let actionBtn = '<span class="text-xs text-slate-400">Thiếu STK</span>';
+        if (s.vietqrUrl) {
+          if (s.isMomo) {
+            actionBtn = \`
+              <button type="button" onclick="openQrModal(\${idx})" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200 inline-flex items-center space-x-1.5 cursor-pointer shadow-sm transition-all" title="Xem QR MoMo hoặc mở app MoMo">
+                <span class="w-2 h-2 rounded-full bg-[#d82d8b]"></span>
+                <span>Ví MoMo / QR</span>
+              </button>
+            \`;
+          } else {
+            actionBtn = \`
+              <button type="button" onclick="openQrModal(\${idx})" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center space-x-1 cursor-pointer transition-all">
+                <i data-lucide="qr-code" class="w-3.5 h-3.5"></i>
+                <span>Xem QR</span>
+              </button>
+            \`;
+          }
+        }
+
         const tr = document.createElement('tr');
         tr.innerHTML = \`
           <td class="p-3">
@@ -1069,10 +1106,7 @@ app.get('*', (c) => {
           <td class="p-3 text-right text-sky-600 font-medium">+\${formatVND(s.shipping)}</td>
           <td class="p-3 text-right font-bold text-brand-600 text-base">\${formatVND(s.finalAmount)}</td>
           <td class="p-3 text-center">
-            \${s.vietqrUrl ? \`<button type="button" onclick="openQrModal(\${idx})" class="text-xs font-semibold px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center space-x-1 cursor-pointer">
-              <i data-lucide="qr-code" class="w-3.5 h-3.5"></i>
-              <span>Xem QR</span>
-            </button>\` : '<span class="text-xs text-slate-400">Thiếu STK</span>'}
+            \${actionBtn}
           </td>
         \`;
         tbody.appendChild(tr);
@@ -1082,24 +1116,147 @@ app.get('*', (c) => {
       lucide.createIcons();
     }
 
-    // Modal VietQR
+    // Modal Thanh Toán (Hỗ trợ Ví MoMo & Ngân Hàng VietQR)
     function openQrModal(idx) {
       const s = currentSettlements[idx];
-      document.getElementById('qr-modal-title').textContent = 'Mã QR: ' + s.name;
-      document.getElementById('qr-modal-img').src = s.vietqrUrl;
-      document.getElementById('qr-modal-info').innerHTML = \`
-        <div>• Ngân hàng: <b>\${s.bankInfo.bank_code || ''}</b></div>
-        <div>• Số tài khoản: <b>\${s.bankInfo.account_no || ''}</b></div>
-        <div>• Chủ tài khoản: <b>\${s.bankInfo.account_holder || ''}</b></div>
-        <div>• Số tiền: <b class="text-brand-600 text-sm">\${formatVND(s.finalAmount)}</b></div>
-        <div>• Nội dung: <b>AN TRUA \${s.name}</b></div>
-      \`;
+      const isMomo = s.isMomo;
+      const modalTitle = document.getElementById('qr-modal-title');
+      const modalImg = document.getElementById('qr-modal-img');
+      const modalInfo = document.getElementById('qr-modal-info');
+      const modalActions = document.getElementById('qr-modal-actions');
+
+      modalImg.src = s.vietqrUrl;
+
+      if (isMomo) {
+        modalTitle.innerHTML = \`
+          <div class="flex items-center space-x-2">
+            <span class="px-2 py-0.5 rounded bg-[#d82d8b] text-white font-bold text-xs uppercase tracking-wide">MoMo</span>
+            <span class="font-bold text-slate-900 text-base">Thanh Toán: \${s.name}</span>
+          </div>
+        \`;
+        modalInfo.innerHTML = \`
+          <div class="space-y-1.5">
+            <div class="flex justify-between items-center py-0.5 border-b border-pink-100">
+              <span class="text-slate-500">Chủ ví nhận:</span>
+              <span class="font-bold text-slate-900">\${s.bankInfo.account_holder || ''}</span>
+            </div>
+            <div class="flex justify-between items-center py-0.5 border-b border-pink-100">
+              <span class="text-slate-500">Số điện thoại MoMo:</span>
+              <span class="font-bold text-[#be185d] font-mono text-sm">\${s.bankInfo.account_no || ''}</span>
+            </div>
+            <div class="flex justify-between items-center py-0.5 border-b border-pink-100">
+              <span class="text-slate-500">Số tiền cần chuyển:</span>
+              <span class="font-bold text-[#be185d] text-base">\${formatVND(s.finalAmount)}</span>
+            </div>
+            <div class="flex justify-between items-center py-0.5">
+              <span class="text-slate-500">Lời nhắn:</span>
+              <span class="font-bold text-slate-800">AN TRUA \${s.name}</span>
+            </div>
+          </div>
+        \`;
+        modalActions.innerHTML = \`
+          <button type="button" onclick="openMomoApp('\${s.bankInfo.account_no}', \${s.finalAmount})" class="w-full bg-[#d82d8b] hover:bg-[#be185d] text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-md shadow-pink-500/25 transition-all flex items-center justify-center space-x-2 cursor-pointer">
+            <i data-lucide="smartphone" class="w-4 h-4"></i>
+            <span>Mở Ứng Dụng MoMo Để Chuyển</span>
+          </button>
+          <div class="grid grid-cols-2 gap-2 pt-1">
+            <button type="button" onclick="copyToClipboard('\${s.finalAmount}', 'Đã copy số tiền \${formatVND(s.finalAmount)}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              <span>Copy số tiền</span>
+            </button>
+            <button type="button" onclick="copyToClipboard('\${s.bankInfo.account_no}', 'Đã copy SĐT MoMo \${s.bankInfo.account_no}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
+              <i data-lucide="phone" class="w-3.5 h-3.5"></i>
+              <span>Copy SĐT</span>
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 text-center leading-relaxed pt-1">
+            * Bấm "Mở Ứng Dụng MoMo" sẽ tự động copy số tiền và mở app. Bạn cũng có thể dùng app MoMo hoặc ngân hàng quét mã QR trên để chuyển tiền tự động.
+          </p>
+        \`;
+      } else {
+        modalTitle.innerHTML = \`
+          <div class="flex items-center space-x-2">
+            <span class="px-2 py-0.5 rounded bg-blue-600 text-white font-bold text-xs uppercase tracking-wide">\${s.bankInfo.bank_code || 'VietQR'}</span>
+            <span class="font-bold text-slate-900 text-base">Thanh Toán: \${s.name}</span>
+          </div>
+        \`;
+        modalInfo.innerHTML = \`
+          <div class="space-y-1.5">
+            <div class="flex justify-between items-center py-0.5 border-b border-slate-100">
+              <span class="text-slate-500">Ngân hàng:</span>
+              <span class="font-bold text-slate-900">\${s.bankInfo.bank_name || s.bankInfo.bank_code || ''}</span>
+            </div>
+            <div class="flex justify-between items-center py-0.5 border-b border-slate-100">
+              <span class="text-slate-500">Số tài khoản:</span>
+              <span class="font-bold text-blue-700 font-mono text-sm">\${s.bankInfo.account_no || ''}</span>
+            </div>
+            <div class="flex justify-between items-center py-0.5 border-b border-slate-100">
+              <span class="text-slate-500">Chủ tài khoản:</span>
+              <span class="font-bold text-slate-900">\${s.bankInfo.account_holder || ''}</span>
+            </div>
+            <div class="flex justify-between items-center py-0.5 border-b border-slate-100">
+              <span class="text-slate-500">Số tiền:</span>
+              <span class="font-bold text-brand-600 text-base">\${formatVND(s.finalAmount)}</span>
+            </div>
+            <div class="flex justify-between items-center py-0.5">
+              <span class="text-slate-500">Nội dung:</span>
+              <span class="font-bold text-slate-800">AN TRUA \${s.name}</span>
+            </div>
+          </div>
+        \`;
+        modalActions.innerHTML = \`
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" onclick="copyToClipboard('\${s.finalAmount}', 'Đã copy số tiền \${formatVND(s.finalAmount)}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              <span>Copy số tiền</span>
+            </button>
+            <button type="button" onclick="copyToClipboard('\${s.bankInfo.account_no}', 'Đã copy STK \${s.bankInfo.account_no}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
+              <i data-lucide="credit-card" class="w-3.5 h-3.5"></i>
+              <span>Copy STK</span>
+            </button>
+          </div>
+        \`;
+      }
+
       document.getElementById('qr-modal').classList.remove('hidden');
       lucide.createIcons();
     }
 
     function closeQrModal() {
       document.getElementById('qr-modal').classList.add('hidden');
+    }
+
+    function copyToClipboard(text, msg) {
+      if (!text) return;
+      navigator.clipboard.writeText(String(text)).then(() => {
+        showToast(msg || 'Đã sao chép vào bộ nhớ tạm!');
+      }).catch(() => {
+        prompt('Sao chép giá trị sau:', text);
+      });
+    }
+
+    function openMomoApp(phone, amount) {
+      navigator.clipboard.writeText(String(amount)).catch(() => {});
+      showToast(\`Đã copy \${formatVND(amount)}! Đang chuyển sang MoMo...\`);
+      setTimeout(() => {
+        window.open(\`https://me.momo.vn/\${phone}\`, '_blank');
+      }, 300);
+    }
+
+    function showToast(msg) {
+      let toast = document.getElementById('toast-notification');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast-notification';
+        toast.className = 'fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white px-4 py-2.5 rounded-xl text-xs font-semibold shadow-xl border border-slate-700 flex items-center space-x-2 transition-all duration-300 pointer-events-none opacity-0 translate-y-2';
+        document.body.appendChild(toast);
+      }
+      toast.innerHTML = \`<i data-lucide="check-circle" class="w-4 h-4 text-emerald-400 shrink-0"></i><span>\${msg}</span>\`;
+      lucide.createIcons();
+      toast.classList.remove('opacity-0', 'translate-y-2');
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+      }, 2500);
     }
 
     // Copy Zalo / Slack text
@@ -1110,16 +1267,26 @@ app.get('*', (c) => {
 
       currentSettlements.forEach((s, i) => {
         text += \`\${i + 1}. \${s.name}: \${formatVND(s.finalAmount)} (\${s.dishesStr})\\n\`;
-        if (s.vietqrUrl) text += \`   👉 Quét QR: \${s.vietqrUrl}\\n\`;
+        if (s.isMomo && s.bankInfo.account_no) {
+          text += \`   👉 Mở MoMo: https://me.momo.vn/\${s.bankInfo.account_no}\\n\`;
+        }
+        if (s.vietqrUrl) {
+          text += \`   👉 Quét QR: \${s.vietqrUrl}\\n\`;
+        }
       });
 
       if (currentSettlements.length && currentSettlements[0].bankInfo) {
         const b = currentSettlements[0].bankInfo;
-        text += \`--------------------------------\\nSTK: \${b.account_no} - \${b.bank_code} (\${b.account_holder})\\n\`;
+        text += \`--------------------------------\\n\`;
+        if (currentSettlements[0].isMomo) {
+          text += \`Ví MoMo: \${b.account_no} (\${b.account_holder})\\nLink MoMo: https://me.momo.vn/\${b.account_no}\\n\`;
+        } else {
+          text += \`STK: \${b.account_no} - \${b.bank_code} (\${b.account_holder})\\n\`;
+        }
       }
 
       navigator.clipboard.writeText(text).then(() => {
-        alert('Đã copy bảng kê vào clipboard! Bạn có thể dán ngay vào Zalo hoặc Slack.');
+        showToast('Đã copy bảng kê vào clipboard! Bạn có thể dán ngay vào Zalo hoặc Slack.');
       });
     }
 
@@ -1254,30 +1421,51 @@ app.get('*', (c) => {
       }
     }
 
+    function onBankSelectChange() {
+      const code = document.getElementById('acc-bank-code').value;
+      const lblNo = document.getElementById('lbl-acc-no');
+      const inputNo = document.getElementById('acc-no');
+      if (code === 'MOMO') {
+        lblNo.textContent = 'Số điện thoại MoMo';
+        inputNo.placeholder = 'Ví dụ: 03066416402';
+      } else {
+        lblNo.textContent = 'Số tài khoản ngân hàng';
+        inputNo.placeholder = 'Ví dụ: 0987654321';
+      }
+    }
+
     function renderPaymentAccounts() {
       const container = document.getElementById('payment-accounts-list');
       container.innerHTML = '';
       if (!paymentAccounts.length) {
-        container.innerHTML = '<div class="text-xs text-slate-400 text-center p-3">Chưa có tài khoản ngân hàng nào.</div>';
+        container.innerHTML = '<div class="text-xs text-slate-400 text-center p-3">Chưa có tài khoản thanh toán nào.</div>';
         return;
       }
 
       paymentAccounts.forEach(a => {
+        const isMomo = a.bank_code === 'MOMO' || a.bank_code === '971025' || (a.bank_name || '').toUpperCase().indexOf('MOMO') !== -1;
         const div = document.createElement('div');
-        div.className = \`flex items-center justify-between p-3 rounded-xl border \${a.is_default ? 'border-brand-500 bg-brand-50/20' : 'border-slate-200 bg-white'}\`;
+        div.className = \`flex items-center justify-between p-3.5 rounded-xl border \${a.is_default ? 'border-brand-500 bg-brand-50/20 shadow-sm' : 'border-slate-200 bg-white'}\`;
+        
+        const badgeHtml = isMomo
+          ? '<div class="w-10 h-10 rounded-xl bg-[#d82d8b] text-white flex items-center justify-center font-bold text-xs shadow-sm shadow-pink-500/20 shrink-0">MoMo</div>'
+          : \`<div class="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-xs shrink-0">\${a.bank_code}</div>\`;
+        
+        const descHtml = isMomo
+          ? 'Ví MoMo • Napas 971025'
+          : (a.bank_name || a.bank_code);
+
         div.innerHTML = \`
           <div class="flex items-center space-x-3">
-            <div class="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center font-bold text-xs text-slate-700">
-              \${a.bank_code}
-            </div>
+            \${badgeHtml}
             <div>
               <div class="text-sm font-bold text-slate-900">\${a.account_no} (\${a.account_holder})</div>
-              <div class="text-xs text-slate-500">\${a.bank_name || a.bank_code} \${a.is_default ? '• <span class="text-brand-600 font-semibold">Mặc định</span>' : ''}</div>
+              <div class="text-xs text-slate-500">\${descHtml} \${a.is_default ? '• <span class="text-brand-600 font-semibold">Mặc định</span>' : ''}</div>
             </div>
           </div>
           <div class="flex items-center space-x-2">
-            \${!a.is_default ? \`<button type="button" onclick="setDefaultAccount(\${a.id})" class="text-xs text-slate-600 hover:text-brand-600 px-2 py-1 rounded border border-slate-200 cursor-pointer">Đặt mặc định</button>\` : ''}
-            <button type="button" onclick="deletePaymentAccount(\${a.id})" class="text-slate-400 hover:text-red-500 p-1 cursor-pointer">
+            \${!a.is_default ? \`<button type="button" onclick="setDefaultAccount(\${a.id})" class="text-xs text-slate-600 hover:text-brand-600 px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer">Đặt mặc định</button>\` : ''}
+            <button type="button" onclick="deletePaymentAccount(\${a.id})" class="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer" title="Xóa tài khoản">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
           </div>
@@ -1292,9 +1480,11 @@ app.get('*', (c) => {
       if (!sel) return;
       sel.innerHTML = '';
       paymentAccounts.forEach(a => {
+        const isMomo = a.bank_code === 'MOMO' || a.bank_code === '971025' || (a.bank_name || '').toUpperCase().indexOf('MOMO') !== -1;
         const opt = document.createElement('option');
         opt.value = a.id;
-        opt.textContent = \`\${a.bank_code} - \${a.account_no} (\${a.account_holder})\` + (a.is_default ? ' [Mặc định]' : '');
+        const prefix = isMomo ? 'Ví MoMo' : a.bank_code;
+        opt.textContent = \`\${prefix} - \${a.account_no} (\${a.account_holder})\` + (a.is_default ? ' [Mặc định]' : '');
         if (a.is_default) opt.selected = true;
         sel.appendChild(opt);
       });
@@ -1303,7 +1493,9 @@ app.get('*', (c) => {
     async function addPaymentAccount(e) {
       e.preventDefault();
       const bank_code = document.getElementById('acc-bank-code').value;
-      const bank_name = document.getElementById('acc-bank-code').selectedOptions[0].text;
+      const selectElem = document.getElementById('acc-bank-code');
+      const isMomo = bank_code === 'MOMO' || bank_code === '971025';
+      const bank_name = isMomo ? 'Ví MoMo' : selectElem.selectedOptions[0].text;
       const account_no = document.getElementById('acc-no').value.trim();
       const account_holder = document.getElementById('acc-holder').value.trim();
 
@@ -1315,7 +1507,7 @@ app.get('*', (c) => {
       const data = await res.json();
       if (data.success) {
         document.getElementById('acc-no').value = '';
-        document.getElementById('acc-holder').value = '';
+        showToast('Đã thêm tài khoản thanh toán thành công!');
         loadPaymentAccounts();
       } else {
         alert(data.error);
@@ -1324,12 +1516,14 @@ app.get('*', (c) => {
 
     async function setDefaultAccount(id) {
       await fetch('/api/payment-accounts/' + id + '/default', { method: 'PUT' });
+      showToast('Đã chuyển tài khoản mặc định!');
       loadPaymentAccounts();
     }
 
     async function deletePaymentAccount(id) {
       if (!confirm('Xóa tài khoản này?')) return;
       await fetch('/api/payment-accounts/' + id, { method: 'DELETE' });
+      showToast('Đã xóa tài khoản!');
       loadPaymentAccounts();
     }
 

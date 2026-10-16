@@ -113,56 +113,120 @@ function formatVND(num) {
 }
 
 function buildMemberEmailHtml(m, storeName, dateStr) {
+  var isMomo = false;
+  if (m.bank_info) {
+    var code = (m.bank_info.bank_code || m.bank_info.bank || "").toUpperCase();
+    var name = (m.bank_info.bank_name || "").toUpperCase();
+    if (code === "MOMO" || code === "971025" || name.indexOf("MOMO") !== -1) {
+      isMomo = true;
+    }
+  }
+
+  var paymentMethodBadge = isMomo 
+    ? '<span style="background-color: #d82d8b; color: #ffffff; font-size: 11px; font-weight: bold; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">Ví MoMo</span>'
+    : '<span style="background-color: #2563eb; color: #ffffff; font-size: 11px; font-weight: bold; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">Ngân Hàng (VietQR)</span>';
+
+  // Nút mở MoMo nếu là ví MoMo
+  var momoButtonHtml = "";
+  if (isMomo && m.bank_info && m.bank_info.account_no) {
+    momoButtonHtml = '<div style="text-align: center; margin: 18px 0 8px 0;">' +
+      '<a href="https://me.momo.vn/' + m.bank_info.account_no + '" target="_blank" style="background-color: #d82d8b; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block; box-shadow: 0 2px 6px rgba(216,45,139,0.3);">' +
+      'Mở Ứng Dụng MoMo Để Chuyển Tiền' +
+      '</a>' +
+      '</div>' +
+      '<p style="text-align: center; font-size: 12px; color: #64748b; margin: 0 0 16px 0; line-height: 1.4;">' +
+      '* Khi bấm vào nút trên, app MoMo sẽ tự động mở với thông tin người nhận. Bạn hãy nhập đúng số tiền là <b style="color: #d82d8b;">' + formatVND(m.final_amount) + '</b> (hoặc quét mã QR bên dưới để được tự động điền sẵn số tiền).' +
+      '</p>';
+  }
+
+  // QR Code Image
   var qrImgTag = "";
   if (m.vietqr_url) {
+    var qrHeading = isMomo 
+      ? 'Quét mã QR MoMo để thanh toán (tự động điền số tiền):'
+      : 'Quét mã VietQR để thanh toán nhanh (tự động điền số tiền):';
     qrImgTag = '<div style="text-align: center; margin: 20px 0;">' +
-      '<p style="font-weight: 600; color: #1e293b; margin-bottom: 8px;">Quét mã VietQR để thanh toán nhanh:</p>' +
-      '<img src="' + m.vietqr_url + '" alt="Mã VietQR" style="max-width: 260px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e2e8f0;" />' +
+      '<p style="font-weight: 600; color: #1e293b; margin-bottom: 8px; font-size: 13px;">' + qrHeading + '</p>' +
+      '<img src="' + m.vietqr_url + '" alt="Mã QR Thanh Toán" style="max-width: 240px; width: 100%; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #e2e8f0;" />' +
       '</div>';
   }
 
-  var bankInfoHtml = "";
+  // Thông tin tài khoản
+  var paymentInfoHtml = "";
   if (m.bank_info) {
-    bankInfoHtml = '<div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-top: 15px; font-size: 13px; color: #334155;">' +
-      '<strong>Thông tin chuyển khoản:</strong><br>' +
-      '• Ngân hàng: <b>' + (m.bank_info.bank || "") + '</b><br>' +
-      '• Số tài khoản: <b style="color: #2563eb;">' + (m.bank_info.account_no || "") + '</b><br>' +
-      '• Chủ tài khoản: <b>' + (m.bank_info.account_holder || "") + '</b><br>' +
-      '• Nội dung: <b style="color: #ea580c;">AN TRUA ' + (m.name || "") + '</b>' +
-      '</div>';
+    if (isMomo) {
+      paymentInfoHtml = '<table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 8px; padding: 14px; margin-top: 15px; font-size: 13px; color: #831843;">' +
+        '<tr><td colspan="2" style="font-weight: bold; padding-bottom: 6px; color: #9d174d;">Thông tin ví nhận tiền:</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #701a75;">Hình thức:</td><td align="right" style="padding: 3px 0; font-weight: bold;">Ví MoMo (Mã Napas 971025)</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #701a75;">Số điện thoại ví:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #be185d;">' + (m.bank_info.account_no || "") + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #701a75;">Chủ ví:</td><td align="right" style="padding: 3px 0; font-weight: bold;">' + (m.bank_info.account_holder || "") + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #701a75;">Số tiền cần chuyển:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #be185d; font-size: 14px;">' + formatVND(m.final_amount) + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #701a75;">Nội dung chuyển tiền:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #ea580c;">AN TRUA ' + (m.name || "") + '</td></tr>' +
+        '</table>';
+    } else {
+      paymentInfoHtml = '<table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-top: 15px; font-size: 13px; color: #334155;">' +
+        '<tr><td colspan="2" style="font-weight: bold; padding-bottom: 6px; color: #0f172a;">Thông tin chuyển khoản ngân hàng:</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #64748b;">Ngân hàng thụ hưởng:</td><td align="right" style="padding: 3px 0; font-weight: bold;">' + (m.bank_info.bank_name || m.bank_info.bank_code || m.bank_info.bank || "") + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #64748b;">Số tài khoản:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #2563eb;">' + (m.bank_info.account_no || "") + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #64748b;">Chủ tài khoản:</td><td align="right" style="padding: 3px 0; font-weight: bold;">' + (m.bank_info.account_holder || "") + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #64748b;">Số tiền cần chuyển:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #ea580c; font-size: 14px;">' + formatVND(m.final_amount) + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #64748b;">Nội dung chuyển tiền:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #ea580c;">AN TRUA ' + (m.name || "") + '</td></tr>' +
+        '</table>';
+    }
   }
 
   return '<!DOCTYPE html>' +
     '<html><head><meta charset="utf-8"></head>' +
-    '<body style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; padding: 20px; margin: 0;">' +
-    '<div style="max-width: 500px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06);">' +
-    '  <div style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); padding: 24px 20px; color: #ffffff; text-align: center;">' +
-    '    <h2 style="margin: 0; font-size: 20px;">🍱 Tiền Ăn Trưa Văn Phòng</h2>' +
-    '    <p style="margin: 6px 0 0; opacity: 0.9; font-size: 14px;">Quán: <b>' + storeName + '</b> (' + dateStr + ')</p>' +
-    '  </div>' +
-    '  <div style="padding: 24px 20px;">' +
-    '    <p style="font-size: 16px; color: #1e293b; margin-top: 0;">Xin chào <b>' + (m.name || "bạn") + '</b>,</p>' +
-    '    <p style="color: #475569; font-size: 14px; line-height: 1.5;">Dưới đây là chi tiết tiền ăn trưa của bạn hôm nay:</p>' +
-    '    <div style="background-color: #fff7ed; border-left: 4px solid #f97316; padding: 12px 16px; margin: 16px 0; border-radius: 0 8px 8px 0;">' +
-    '      <div style="font-weight: 600; color: #9a3412; font-size: 15px;">' + (m.dish_name || "Món ăn") + '</div>' +
-    '      <div style="display: flex; justify-content: space-between; font-size: 13px; color: #7c2d12; margin-top: 6px;">' +
-    '        <span>Giá gốc món:</span> <span>' + formatVND(m.original_price) + '</span>' +
-    '      </div>' +
-    (m.discount ? '      <div style="display: flex; justify-content: space-between; font-size: 13px; color: #16a34a; margin-top: 2px;">' +
-    '        <span>Giảm giá món:</span> <span>-' + formatVND(m.discount) + '</span>' +
-    '      </div>' : '') +
-    (m.shipping_fee ? '      <div style="display: flex; justify-content: space-between; font-size: 13px; color: #0284c7; margin-top: 2px;">' +
-    '        <span>Phí ship chia đều:</span> <span>+' + formatVND(m.shipping_fee) + '</span>' +
-    '      </div>' : '') +
-    '      <div style="border-top: 1px dashed #fdba74; margin-top: 8px; padding-top: 8px; display: flex; justify-content: space-between; font-size: 16px; font-weight: 700; color: #c2410c;">' +
-    '        <span>CẦN THANH TOÁN:</span> <span>' + formatVND(m.final_amount) + '</span>' +
-    '      </div>' +
-    '    </div>' +
+    '<body style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; padding: 20px; margin: 0; color: #334155;">' +
+    '<table width="100%" border="0" cellpadding="0" cellspacing="0">' +
+    '  <tr><td align="center">' +
+    '    <table width="100%" border="0" cellpadding="0" cellspacing="0" style="max-width: 520px; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); text-align: left;">' +
+    '      <tr>' +
+    '        <td style="background-color: #ea580c; padding: 24px 20px; color: #ffffff; text-align: center;">' +
+    '          <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; opacity: 0.9; margin-bottom: 4px;">Hóa Đơn Tiền Cơm Trưa</div>' +
+    '          <h1 style="margin: 0; font-size: 20px; font-weight: bold; color: #ffffff;">' + storeName + '</h1>' +
+    '          <p style="margin: 6px 0 0; opacity: 0.95; font-size: 13px;">Ngày đặt: <b>' + dateStr + '</b></p>' +
+    '        </td>' +
+    '      </tr>' +
+    '      <tr>' +
+    '        <td style="padding: 24px 20px;">' +
+    '          <p style="font-size: 16px; color: #1e293b; margin-top: 0;">Xin chào <b>' + (m.name || "bạn") + '</b>,</p>' +
+    '          <p style="color: #475569; font-size: 14px; line-height: 1.5; margin-bottom: 16px;">Dưới đây là chi tiết tiền ăn trưa của bạn hôm nay:</p>' +
+    '          <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #fff7ed; border-left: 4px solid #ea580c; border-radius: 0 8px 8px 0; padding: 14px 16px; margin: 16px 0;">' +
+    '            <tr>' +
+    '              <td colspan="2" style="font-weight: bold; color: #9a3412; font-size: 15px; padding-bottom: 8px;">' + (m.dish_name || "Món ăn đã đặt") + '</td>' +
+    '            </tr>' +
+    '            <tr>' +
+    '              <td style="font-size: 13px; color: #7c2d12; padding: 3px 0;">Giá gốc món ăn:</td>' +
+    '              <td align="right" style="font-size: 13px; color: #7c2d12; padding: 3px 0; font-weight: 500;">' + formatVND(m.original_price) + '</td>' +
+    '            </tr>' +
+    (m.discount ? (
+    '            <tr>' +
+    '              <td style="font-size: 13px; color: #16a34a; padding: 3px 0;">Được giảm giá voucher:</td>' +
+    '              <td align="right" style="font-size: 13px; color: #16a34a; padding: 3px 0; font-weight: 600;">-' + formatVND(m.discount) + '</td>' +
+    '            </tr>'
+    ) : '') +
+    (m.shipping_fee ? (
+    '            <tr>' +
+    '              <td style="font-size: 13px; color: #0284c7; padding: 3px 0;">Phí ship & phụ phí chia đều:</td>' +
+    '              <td align="right" style="font-size: 13px; color: #0284c7; padding: 3px 0; font-weight: 600;">+' + formatVND(m.shipping_fee) + '</td>' +
+    '            </tr>'
+    ) : '') +
+    '            <tr>' +
+    '              <td style="border-top: 1px dashed #fdba74; margin-top: 8px; padding-top: 10px; font-size: 14px; font-weight: bold; color: #c2410c;">TỔNG CẦN THANH TOÁN:</td>' +
+    '              <td align="right" style="border-top: 1px dashed #fdba74; margin-top: 8px; padding-top: 10px; font-size: 18px; font-weight: bold; color: #ea580c;">' + formatVND(m.final_amount) + '</td>' +
+    '            </tr>' +
+    '          </table>' +
+    momoButtonHtml +
     qrImgTag +
-    bankInfoHtml +
-    '    <p style="text-align: center; color: #94a3b8; font-size: 12px; margin-top: 24px;">Cảm ơn bạn! Chúc bạn bữa trưa ngon miệng.</p>' +
-    '  </div>' +
-    '</div></body></html>';
+    paymentInfoHtml +
+    '          <p style="text-align: center; color: #94a3b8; font-size: 12px; margin-top: 24px; margin-bottom: 0;">Chúc bạn có một bữa trưa ngon miệng!</p>' +
+    '        </td>' +
+    '      </tr>' +
+    '    </table>' +
+    '  </td></tr>' +
+    '</table>' +
+    '</body></html>';
 }
 
 function buildAdminEmailHtml(data, storeName, dateStr) {
@@ -174,33 +238,43 @@ function buildAdminEmailHtml(data, storeName, dateStr) {
     var m = members[i];
     totalAmount += (m.final_amount || 0);
     rowsHtml += '<tr style="border-bottom: 1px solid #e2e8f0;">' +
-      '<td style="padding: 10px; font-weight: 500;">' + (m.name || "") + '</td>' +
-      '<td style="padding: 10px; color: #64748b;">' + (m.dish_name || "") + '</td>' +
-      '<td style="padding: 10px; text-align: right; font-weight: 600; color: #ea580c;">' + formatVND(m.final_amount) + '</td>' +
+      '<td style="padding: 10px; font-weight: 600; color: #0f172a;">' + (m.name || "") + '</td>' +
+      '<td style="padding: 10px; color: #475569;">' + (m.dish_name || "") + '</td>' +
+      '<td style="padding: 10px; text-align: right; font-weight: bold; color: #ea580c;">' + formatVND(m.final_amount) + '</td>' +
       '</tr>';
   }
 
   return '<!DOCTYPE html>' +
     '<html><head><meta charset="utf-8"></head>' +
-    '<body style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; background-color: #f1f5f9; padding: 20px;">' +
-    '<div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.06);">' +
-    '  <h2 style="color: #1e293b; margin-top: 0;">📊 Bảng Tổng Hợp Tiền Ăn Trưa</h2>' +
-    '  <p style="color: #64748b; font-size: 14px;">Quán: <b>' + storeName + '</b> | Ngày: <b>' + dateStr + '</b></p>' +
-    '  <table style="width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px;">' +
-    '    <thead>' +
-    '      <tr style="background-color: #f8fafc; border-bottom: 2px solid #cbd5e1; text-align: left;">' +
-    '        <th style="padding: 10px;">Thành viên</th>' +
-    '        <th style="padding: 10px;">Món</th>' +
-    '        <th style="padding: 10px; text-align: right;">Cần thu</th>' +
-    '      </tr>' +
-    '    </thead>' +
-    '    <tbody>' + rowsHtml + '</tbody>' +
-    '    <tfoot>' +
-    '      <tr style="background-color: #fff7ed; font-weight: 700;">' +
-    '        <td colspan="2" style="padding: 12px 10px; color: #9a3412;">TỔNG TIỀN CẦN THU:</td>' +
-    '        <td style="padding: 12px 10px; text-align: right; color: #ea580c; font-size: 16px;">' + formatVND(totalAmount) + '</td>' +
-    '      </tr>' +
-    '    </tfoot>' +
-    '  </table>' +
-    '</div></body></html>';
+    '<body style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; background-color: #f1f5f9; padding: 20px; margin: 0; color: #334155;">' +
+    '<table width="100%" border="0" cellpadding="0" cellspacing="0">' +
+    '  <tr><td align="center">' +
+    '    <table width="100%" border="0" cellpadding="0" cellspacing="0" style="max-width: 600px; background: #ffffff; border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); text-align: left;">' +
+    '      <tr><td>' +
+    '        <div style="border-bottom: 2px solid #f1f5f9; padding-bottom: 16px; margin-bottom: 16px;">' +
+    '          <span style="background-color: #ea580c; color: #ffffff; font-size: 11px; font-weight: bold; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">BẢNG KÊ QUẢN TRỊ</span>' +
+    '          <h2 style="color: #0f172a; margin: 8px 0 4px 0; font-size: 20px;">Tổng Hợp Tiền Ăn Trưa</h2>' +
+    '          <p style="color: #64748b; font-size: 13px; margin: 0;">Quán ăn: <b>' + storeName + '</b> | Ngày: <b>' + dateStr + '</b></p>' +
+    '        </div>' +
+    '        <table width="100%" border="0" cellpadding="0" cellspacing="0" style="border-collapse: collapse; font-size: 14px;">' +
+    '          <thead>' +
+    '            <tr style="background-color: #f8fafc; border-bottom: 2px solid #cbd5e1; text-align: left;">' +
+    '              <th style="padding: 10px; color: #475569;">Thành viên</th>' +
+    '              <th style="padding: 10px; color: #475569;">Món ăn</th>' +
+    '              <th style="padding: 10px; text-align: right; color: #475569;">Cần thu</th>' +
+    '            </tr>' +
+    '          </thead>' +
+    '          <tbody>' + rowsHtml + '</tbody>' +
+    '          <tfoot>' +
+    '            <tr style="background-color: #fff7ed; font-weight: bold;">' +
+    '              <td colspan="2" style="padding: 14px 10px; color: #9a3412;">TỔNG TIỀN CẦN THU:</td>' +
+    '              <td style="padding: 14px 10px; text-align: right; color: #ea580c; font-size: 17px;">' + formatVND(totalAmount) + '</td>' +
+    '            </tr>' +
+    '          </tfoot>' +
+    '        </table>' +
+    '      </td></tr>' +
+    '    </table>' +
+    '  </td></tr>' +
+    '</table>' +
+    '</body></html>';
 }
