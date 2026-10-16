@@ -46,23 +46,14 @@ Hệ thống quản lý, quét hóa đơn và chia tiền ăn trưa văn phòng 
 ### 1. Cài đặt Google Apps Script gửi mail
 Xem hướng dẫn chi tiết từng bước trong file [`google-apps-script.js`](google-apps-script.js).
 
-### 2. Triển khai Worker lên Cloudflare
-Có 2 cách:
+### 2. Triển khai Worker lên Cloudflare (CI/CD Tự Động)
 
-#### Cách 1: Kết nối Git trên Cloudflare Dashboard (Khuyên Dùng)
-1. Vào [Cloudflare Dashboard](https://dash.cloudflare.com/) -> **Workers & Pages** -> **Create application** -> **Workers** -> **Connect to Git**.
-2. Chọn repository `ICRRevengers/lunch-bill-splitter`.
-3. Cloudflare sẽ tự động kéo mã nguồn về và deploy mỗi khi bạn push lên nhánh `main`.
-4. Trong mục **Settings -> Variables & Secrets**, thêm Secret:
-   - Tên: `SCANNER_SECRET_TOKEN`
-   - Giá trị: Mã token trong file `~/.config/phu/secrets.env` trên VPS.
+> [!IMPORTANT]
+> **Dự án đã được thiết lập Auto-Deploy qua Cloudflare Workers Builds!**
+> - Mỗi khi có commit mới được **`git push` lên nhánh `main`** trên GitHub, Cloudflare sẽ **tự động pull mã nguồn, build và deploy** lên Production (`https://lunch.16092001.xyz`).
+> - **KHÔNG CẦN** chạy lệnh `npx wrangler deploy` thủ công mỗi lần sửa code. Mọi thay đổi chỉ cần commit và push lên Git là hoàn tất triển khai.
 
-#### Cách 2: Deploy trực tiếp bằng Wrangler CLI
-```bash
-# Nạp secret token cho worker
-npx wrangler secret put SCANNER_SECRET_TOKEN
+#### Biến môi trường & Secrets (chỉ cấu hình một lần đầu)
+Trong Cloudflare Dashboard -> Worker `lunch-bill-splitter` -> **Settings** -> **Variables and Secrets**:
+- Thêm Secret `SCANNER_SECRET_TOKEN`: Mã token trong file `~/.config/phu/secrets.env` trên VPS (hoặc nạp qua `npx wrangler secret put SCANNER_SECRET_TOKEN`).
 
-# Deploy worker
-npx wrangler deploy
-```
-<!-- Cloudflare Workers Builds verification tag: 2026-10-16T08:31:30Z -->

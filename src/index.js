@@ -671,15 +671,15 @@ app.get('*', async (c) => {
         <nav class="grid grid-cols-3 sm:flex space-x-1 bg-slate-100 p-1 rounded-xl text-xs sm:text-sm font-medium w-full sm:w-auto">
           <button onclick="switchTab('splitter')" id="tab-btn-splitter" class="tab-btn active px-2 sm:px-3.5 py-1.5 rounded-lg transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer">
             <i data-lucide="calculator" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
-            <span>Chia Tiền</span>
+            <span>Bill Split</span>
           </button>
           <button onclick="switchTab('members')" id="tab-btn-members" class="tab-btn px-2 sm:px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer">
             <i data-lucide="users" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
-            <span>Danh Bạ</span>
+            <span>Accounts</span>
           </button>
           <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn px-2 sm:px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer">
             <i data-lucide="settings" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
-            <span>Cài Đặt</span>
+            <span>Settings</span>
           </button>
         </nav>
 
