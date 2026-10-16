@@ -128,9 +128,16 @@ function buildMemberEmailHtml(m, storeName, dateStr) {
 
   // Nút mở MoMo nếu là ví MoMo
   var momoButtonHtml = "";
-  if (isMomo && m.bank_info && m.bank_info.account_no) {
+  var momoUrl = "";
+  if (isMomo && m.bank_info) {
+    momoUrl = (m.bank_info.payment_link || "").trim();
+    if (!momoUrl && m.bank_info.account_no) {
+      momoUrl = 'https://me.momo.vn/' + m.bank_info.account_no;
+    }
+  }
+  if (isMomo && momoUrl) {
     momoButtonHtml = '<div style="text-align: center; margin: 18px 0 8px 0;">' +
-      '<a href="https://me.momo.vn/' + m.bank_info.account_no + '" target="_blank" style="background-color: #d82d8b; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block; box-shadow: 0 2px 6px rgba(216,45,139,0.3);">' +
+      '<a href="' + momoUrl + '" target="_blank" style="background-color: #d82d8b; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block; box-shadow: 0 2px 6px rgba(216,45,139,0.3);">' +
       'Mở Ứng Dụng MoMo Để Chuyển Tiền' +
       '</a>' +
       '</div>' +

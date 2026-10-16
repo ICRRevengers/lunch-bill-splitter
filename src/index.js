@@ -160,8 +160,16 @@ app.delete('/api/members/:id', async (c) => {
 // ==============================================================================
 // 2. API: PAYMENT ACCOUNTS (Tài khoản ngân hàng VietQR)
 // ==============================================================================
+// Helper migration: đảm bảo cột payment_link tồn tại trong bảng payment_accounts
+async function ensurePaymentLinkCol(db) {
+  try {
+    await db.prepare('ALTER TABLE payment_accounts ADD COLUMN payment_link TEXT').run();
+  } catch (_) {}
+}
+
 app.get('/api/payment-accounts', async (c) => {
   try {
+    await ensurePaymentLinkCol(c.env.DB);
     const { results } = await c.env.DB.prepare(
       'SELECT * FROM payment_accounts ORDER BY is_default DESC, id DESC'
     ).all();
@@ -173,7 +181,8 @@ app.get('/api/payment-accounts', async (c) => {
 
 app.post('/api/payment-accounts', async (c) => {
   try {
-    const { bank_code, bank_name, account_no, account_holder, is_default, qr_image_base64 } = await c.req.json();
+    await ensurePaymentLinkCol(c.env.DB);
+    const { bank_code, bank_name, account_no, account_holder, is_default, qr_image_base64, payment_link } = await c.req.json();
     if (!bank_code || !account_no || !account_holder) {
       return c.json({ success: false, error: 'Thiếu thông tin tài khoản' }, 400);
     }
@@ -209,10 +218,11 @@ app.post('/api/payment-accounts', async (c) => {
       await c.env.DB.prepare('UPDATE payment_accounts SET is_default = 0').run();
     }
 
+    const cleanPaymentLink = (payment_link || '').trim() || null;
     const info = await c.env.DB.prepare(
-      `INSERT INTO payment_accounts (bank_code, bank_name, account_no, account_holder, is_default, qr_r2_key)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(bank_code.trim(), (bank_name || bank_code).trim(), account_no.trim(), account_holder.trim().toUpperCase(), is_default ? 1 : 0, qrR2Key).run();
+      `INSERT INTO payment_accounts (bank_code, bank_name, account_no, account_holder, is_default, qr_r2_key, payment_link)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(bank_code.trim(), (bank_name || bank_code).trim(), account_no.trim(), account_holder.trim().toUpperCase(), is_default ? 1 : 0, qrR2Key, cleanPaymentLink).run();
 
     return c.json({ success: true, message: 'Đã thêm tài khoản thanh toán', id: info.meta.last_row_id });
   } catch (err) {
@@ -974,9 +984,24 @@ app.get('*', async (c) => {
             </div>
           </div>
 
-          <!-- MoMo QR Upload Section -->
-          <div id="momo-qr-upload-section" class="border-t border-slate-200/80 pt-3 space-y-2">
-            <div class="flex items-center justify-between">
+          <!-- MoMo Link & QR Upload Section -->
+          <div id="momo-qr-upload-section" class="border-t border-slate-200/80 pt-3 space-y-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">
+                <span class="text-[#d82d8b] font-bold">Link Nhận Tiền MoMo Cá Nhân:</span> Dán link nhận tiền từ app MoMo (Khuyên dùng để tránh lỗi liên kết)
+              </label>
+              <div class="relative">
+                <input type="url" id="acc-momo-link" placeholder="Ví dụ: https://me.momo.vn/xuanphu hoặc copy từ nút Chia sẻ trên MoMo" class="w-full text-sm border border-slate-200 rounded-lg pl-3 pr-8 py-2 bg-white focus:outline-none focus:border-pink-500">
+                <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
+                  <i data-lucide="link" class="w-4 h-4"></i>
+                </div>
+              </div>
+              <p class="text-[11px] text-slate-500 mt-1">
+                💡 <b>Cách lấy:</b> Mở app MoMo &gt; Nhận tiền &gt; Bấm nút <b>Chia sẻ</b> hoặc <b>Tạo link nhận tiền</b> rồi copy dán vào đây. Nút trên email sẽ chuyển thẳng vào app MoMo mà không bị lỗi.
+              </p>
+            </div>
+
+            <div class="flex items-center justify-between pt-1">
               <label class="block text-xs font-semibold text-slate-700">
                 <span class="text-[#d82d8b] font-bold">Mã QR MoMo Cá Nhân:</span> Tải lên ảnh mã QR chụp từ app MoMo của bạn
               </label>
@@ -1489,7 +1514,7 @@ app.get('*', async (c) => {
       const bankAcc = paymentAccounts.find(a => String(a.id) === String(selectedAccId)) || paymentAccounts[0] || {};
 
       const isMomo = (bankAcc.bank_code || '').toUpperCase() === 'MOMO' || bankAcc.bank_code === '971025' || ((bankAcc.bank_name || '').toUpperCase().indexOf('MOMO') !== -1);
-      const momoLink = isMomo && bankAcc.account_no ? \`https://me.momo.vn/\${bankAcc.account_no}\` : '';
+      const momoLink = isMomo ? (bankAcc.payment_link || (bankAcc.account_no ? \`https://me.momo.vn/\${bankAcc.account_no}\` : '')) : '';
 
       let calculatedSum = 0;
       currentSettlements = users.map(u => {
@@ -1628,8 +1653,9 @@ app.get('*', async (c) => {
             </div>
           </div>
         \`;
+        const mLink = s.momoLink || (s.bankInfo && s.bankInfo.payment_link) || '';
         modalActions.innerHTML = \`
-          <button type="button" onclick="openMomoApp('\${s.bankInfo.account_no}', \${s.finalAmount})" class="w-full bg-[#d82d8b] hover:bg-[#be185d] text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-md shadow-pink-500/25 transition-all flex items-center justify-center space-x-2 cursor-pointer">
+          <button type="button" onclick="openMomoApp('\${s.bankInfo.account_no}', \${s.finalAmount}, '\${mLink}')" class="w-full bg-[#d82d8b] hover:bg-[#be185d] text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow-md shadow-pink-500/25 transition-all flex items-center justify-center space-x-2 cursor-pointer">
             <i data-lucide="smartphone" class="w-4 h-4"></i>
             <span>Mở Ứng Dụng MoMo Để Chuyển</span>
           </button>
@@ -1709,11 +1735,12 @@ app.get('*', async (c) => {
       });
     }
 
-    function openMomoApp(phone, amount) {
+    function openMomoApp(phone, amount, customLink) {
       navigator.clipboard.writeText(String(amount)).catch(() => {});
       showToast(\`Đã copy \${formatVND(amount)}! Đang chuyển sang MoMo...\`);
+      const targetUrl = customLink || (phone ? \`https://me.momo.vn/\${phone}\` : 'https://momo.vn');
       setTimeout(() => {
-        window.open(\`https://me.momo.vn/\${phone}\`, '_blank');
+        window.open(targetUrl, '_blank');
       }, 300);
     }
 
@@ -1741,8 +1768,11 @@ app.get('*', async (c) => {
 
       currentSettlements.forEach((s, i) => {
         text += \`\${i + 1}. \${s.name}: \${formatVND(s.finalAmount)} (\${s.dishesStr})\\n\`;
-        if (s.isMomo && s.bankInfo.account_no) {
-          text += \`   👉 Mở MoMo: https://me.momo.vn/\${s.bankInfo.account_no}\\n\`;
+        if (s.isMomo) {
+          const mLink = s.momoLink || (s.bankInfo && s.bankInfo.payment_link) || (s.bankInfo && s.bankInfo.account_no ? \`https://me.momo.vn/\${s.bankInfo.account_no}\` : '');
+          if (mLink) {
+            text += \`   👉 Mở MoMo: \${mLink}\\n\`;
+          }
         }
         if (s.vietqrUrl) {
           text += \`   👉 Quét QR: \${s.vietqrUrl}\\n\`;
@@ -1753,7 +1783,11 @@ app.get('*', async (c) => {
         const b = currentSettlements[0].bankInfo;
         text += \`--------------------------------\\n\`;
         if (currentSettlements[0].isMomo) {
-          text += \`Ví MoMo: \${b.account_no} (\${b.account_holder})\\nLink MoMo: https://me.momo.vn/\${b.account_no}\\n\`;
+          const mLink = (b && b.payment_link) || (b && b.account_no ? \`https://me.momo.vn/\${b.account_no}\` : '');
+          text += \`Ví MoMo: \${b.account_no} (\${b.account_holder})\\n\`;
+          if (mLink) {
+            text += \`Link MoMo: \${mLink}\\n\`;
+          }
         } else {
           text += \`STK: \${b.account_no} - \${b.bank_code} (\${b.account_holder})\\n\`;
         }
@@ -1791,7 +1825,10 @@ app.get('*', async (c) => {
             shipping_fee: s.shipping,
             final_amount: s.finalAmount,
             vietqr_url: qrUrlForEmail,
-            bank_info: s.bankInfo,
+            bank_info: {
+              ...s.bankInfo,
+              payment_link: (s.bankInfo && s.bankInfo.payment_link) || s.momoLink || '',
+            },
           };
         }),
       };
@@ -1990,12 +2027,17 @@ app.get('*', async (c) => {
           ? \`Ví MoMo \${qrStatusText}\`
           : (a.bank_name || a.bank_code);
 
+        const linkHtml = (isMomo && a.payment_link) 
+          ? \`<div class="text-[11px] text-[#d82d8b] truncate max-w-xs mt-0.5"><a href="\${a.payment_link}" target="_blank" class="hover:underline flex items-center gap-1 font-mono"><span>🔗 \${a.payment_link}</span></a></div>\`
+          : '';
+
         div.innerHTML = \`
           <div class="flex items-center space-x-3">
             \${badgeHtml}
             <div>
               <div class="text-sm font-bold text-slate-900">\${a.account_no} (\${a.account_holder})</div>
               <div class="text-xs text-slate-500">\${descHtml} \${a.is_default ? '• <span class="text-brand-600 font-semibold">Mặc định</span>' : ''}</div>
+              \${linkHtml}
             </div>
           </div>
           <div class="flex items-center space-x-2">
@@ -2033,6 +2075,7 @@ app.get('*', async (c) => {
       const bank_name = isMomo ? 'Ví MoMo' : selectElem.selectedOptions[0].text;
       const account_no = document.getElementById('acc-no').value.trim();
       const account_holder = document.getElementById('acc-holder').value.trim();
+      const payment_link = isMomo && document.getElementById('acc-momo-link') ? document.getElementById('acc-momo-link').value.trim() : '';
 
       const btn = document.getElementById('btn-save-acc');
       if (btn) btn.disabled = true;
@@ -2046,6 +2089,7 @@ app.get('*', async (c) => {
             bank_name,
             account_no,
             account_holder,
+            payment_link,
             is_default: paymentAccounts.length === 0,
             qr_image_base64: isMomo ? uploadedMomoQrBase64 : null,
           }),
@@ -2053,6 +2097,7 @@ app.get('*', async (c) => {
         const data = await res.json();
         if (data.success) {
           document.getElementById('acc-no').value = '';
+          if (document.getElementById('acc-momo-link')) document.getElementById('acc-momo-link').value = '';
           removeMomoQrImage();
           showToast('Đã thêm tài khoản thanh toán thành công!');
           loadPaymentAccounts();
