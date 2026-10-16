@@ -428,6 +428,7 @@ app.post('/api/notify', async (c) => {
 
     let gasUrl = payload.gas_url;
     let adminEmail = payload.admin_email;
+    let senderName = payload.sender_name;
 
     if (!gasUrl) {
       const row = await c.env.DB.prepare(
@@ -443,6 +444,13 @@ app.post('/api/notify', async (c) => {
       if (row) adminEmail = row.value;
     }
 
+    if (!senderName) {
+      const row = await c.env.DB.prepare(
+        "SELECT value FROM app_settings WHERE key = 'sender_name'"
+      ).first();
+      if (row && row.value) senderName = row.value;
+    }
+
     if (!gasUrl) {
       return c.json({
         success: false,
@@ -451,6 +459,7 @@ app.post('/api/notify', async (c) => {
     }
 
     payload.admin_email = adminEmail || '';
+    payload.sender_name = senderName || 'Cơm Trưa Đồng Nghiệp';
 
     const gasRes = await fetch(gasUrl, {
       method: 'POST',
@@ -1052,6 +1061,11 @@ app.get('*', async (c) => {
           <div>
             <label class="block text-xs font-medium text-slate-500 mb-1">Google Apps Script Web App URL</label>
             <input type="url" id="setting-gas-url" placeholder="https://script.google.com/macros/s/AKfycb.../exec" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Tên Người Gửi Hiển Thị (Tránh vào Spam)</label>
+            <input type="text" id="setting-sender-name" placeholder="Ví dụ: Alviss - Cơm Trưa" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
+            <p class="text-[11px] text-slate-400 mt-1">Nên đặt kèm tên của bạn (ví dụ: Alviss - Cơm Trưa) để bạn bè nhận diện ngay và không bị bộ lọc Gmail đánh giá là thư rác mạo danh.</p>
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-500 mb-1">Email của Alviss (Nhận bảng tổng hợp đơn)</label>
@@ -2131,6 +2145,7 @@ app.get('*', async (c) => {
         const data = await res.json();
         if (data.success && data.data) {
           if (data.data.gas_url) document.getElementById('setting-gas-url').value = data.data.gas_url;
+          if (data.data.sender_name) document.getElementById('setting-sender-name').value = data.data.sender_name;
           if (data.data.admin_email) document.getElementById('setting-admin-email').value = data.data.admin_email;
         }
       } catch (err) {
@@ -2140,11 +2155,12 @@ app.get('*', async (c) => {
 
     async function saveSettings() {
       const gas_url = document.getElementById('setting-gas-url').value.trim();
+      const sender_name = document.getElementById('setting-sender-name').value.trim();
       const admin_email = document.getElementById('setting-admin-email').value.trim();
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gas_url, admin_email }),
+        body: JSON.stringify({ gas_url, sender_name, admin_email }),
       });
       const data = await res.json();
       if (data.success) {
