@@ -135,7 +135,7 @@ function buildMemberEmailHtml(m, storeName, dateStr) {
       '</a>' +
       '</div>' +
       '<p style="text-align: center; font-size: 12px; color: #64748b; margin: 0 0 16px 0; line-height: 1.4;">' +
-      '* Khi bấm vào nút trên, app MoMo sẽ tự động mở với thông tin người nhận. Bạn hãy nhập đúng số tiền là <b style="color: #d82d8b;">' + formatVND(m.final_amount) + '</b> (hoặc quét mã QR bên dưới để được tự động điền sẵn số tiền).' +
+      '* Khi quét mã QR hoặc mở app MoMo, bạn vui lòng nhập số tiền cần chuyển là <b style="color: #d82d8b;">' + formatVND(m.final_amount) + '</b>.' +
       '</p>';
   }
 
@@ -143,7 +143,7 @@ function buildMemberEmailHtml(m, storeName, dateStr) {
   var qrImgTag = "";
   if (m.vietqr_url) {
     var qrHeading = isMomo 
-      ? 'Quét mã QR MoMo để thanh toán (tự động điền số tiền):'
+      ? 'Quét mã QR MoMo của người nhận để thanh toán:'
       : 'Quét mã VietQR để thanh toán nhanh (tự động điền số tiền):';
     qrImgTag = '<div style="text-align: center; margin: 20px 0;">' +
       '<p style="font-weight: 600; color: #1e293b; margin-bottom: 8px; font-size: 13px;">' + qrHeading + '</p>' +
@@ -157,7 +157,7 @@ function buildMemberEmailHtml(m, storeName, dateStr) {
     if (isMomo) {
       paymentInfoHtml = '<table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 8px; padding: 14px; margin-top: 15px; font-size: 13px; color: #831843;">' +
         '<tr><td colspan="2" style="font-weight: bold; padding-bottom: 6px; color: #9d174d;">Thông tin ví nhận tiền:</td></tr>' +
-        '<tr><td style="padding: 3px 0; color: #701a75;">Hình thức:</td><td align="right" style="padding: 3px 0; font-weight: bold;">Ví MoMo (Mã Napas 971025)</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #701a75;">Hình thức:</td><td align="right" style="padding: 3px 0; font-weight: bold;">Ví MoMo</td></tr>' +
         '<tr><td style="padding: 3px 0; color: #701a75;">Số điện thoại ví:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #be185d;">' + (m.bank_info.account_no || "") + '</td></tr>' +
         '<tr><td style="padding: 3px 0; color: #701a75;">Chủ ví:</td><td align="right" style="padding: 3px 0; font-weight: bold;">' + (m.bank_info.account_holder || "") + '</td></tr>' +
         '<tr><td style="padding: 3px 0; color: #701a75;">Số tiền cần chuyển:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #be185d; font-size: 14px;">' + formatVND(m.final_amount) + '</td></tr>' +
