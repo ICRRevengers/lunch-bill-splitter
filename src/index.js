@@ -144,32 +144,39 @@ app.post('/api/settings', async (c) => {
 });
 
 // ==============================================================================
-// 4. API: SCAN BILL (Gọi Scanner Bridge trên VPS)
+// 4. API: SCAN BILL (Gọi Scanner Bridge trên VPS - Hỗ trợ nhiều ảnh)
 // ==============================================================================
 app.post('/api/scan', async (c) => {
   try {
-    const { image_base64 } = await c.req.json();
-    if (!image_base64) {
+    const body = await c.req.json();
+    let images = body.images_base64 || [];
+    if (!images.length && body.image_base64) {
+      images = [body.image_base64];
+    }
+    if (!images.length) {
       return c.json({ success: false, error: 'Thiếu dữ liệu ảnh' }, 400);
     }
 
-    // 1. Lưu ảnh gốc vào Cloudflare R2
-    let imageR2Key = null;
+    // 1. Lưu các ảnh vào Cloudflare R2
+    let imageR2Keys = [];
     if (c.env.BUCKET) {
-      try {
-        const rawB64 = image_base64.includes(',') ? image_base64.split(',')[1] : image_base64;
-        const binaryStr = atob(rawB64);
-        const len = binaryStr.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binaryStr.charCodeAt(i);
+      for (let i = 0; i < images.length; i++) {
+        try {
+          const rawB64 = images[i].includes(',') ? images[i].split(',')[1] : images[i];
+          const binaryStr = atob(rawB64);
+          const len = binaryStr.length;
+          const bytes = new Uint8Array(len);
+          for (let j = 0; j < len; j++) {
+            bytes[j] = binaryStr.charCodeAt(j);
+          }
+          const key = `bill_${Date.now()}_part${i + 1}_${Math.random().toString(36).substring(2, 6)}.jpg`;
+          await c.env.BUCKET.put(key, bytes, {
+            httpMetadata: { contentType: 'image/jpeg' },
+          });
+          imageR2Keys.push(key);
+        } catch (r2Err) {
+          console.error('Lỗi lưu R2:', r2Err);
         }
-        imageR2Key = `bill_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
-        await c.env.BUCKET.put(imageR2Key, bytes, {
-          httpMetadata: { contentType: 'image/jpeg' },
-        });
-      } catch (r2Err) {
-        console.error('Lỗi lưu R2:', r2Err);
       }
     }
 
@@ -189,7 +196,7 @@ app.post('/api/scan', async (c) => {
         'Authorization': `Bearer ${scannerToken}`,
       },
       body: JSON.stringify({
-        image_base64,
+        images_base64: images,
         members: members || [],
       }),
     });
@@ -214,7 +221,7 @@ app.post('/api/scan', async (c) => {
     return c.json({
       success: true,
       data: scannerData.data,
-      image_r2_key: imageR2Key,
+      image_r2_keys: imageR2Keys,
     });
   } catch (err) {
     return c.json({ success: false, error: err.message }, 500);
@@ -228,7 +235,6 @@ app.post('/api/notify', async (c) => {
   try {
     const payload = await c.req.json();
 
-    // Lấy URL GAS từ settings nếu payload không truyền
     let gasUrl = payload.gas_url;
     let adminEmail = payload.admin_email;
 
@@ -326,15 +332,15 @@ app.get('*', (c) => {
 
       <!-- Navigation Tabs -->
       <nav class="flex space-x-1 bg-slate-100 p-1 rounded-xl text-sm font-medium">
-        <button onclick="switchTab('splitter')" id="tab-btn-splitter" class="tab-btn active px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5">
+        <button onclick="switchTab('splitter')" id="tab-btn-splitter" class="tab-btn active px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer">
           <i data-lucide="calculator" class="w-4 h-4"></i>
           <span>Chia Tiền</span>
         </button>
-        <button onclick="switchTab('members')" id="tab-btn-members" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center space-x-1.5">
+        <button onclick="switchTab('members')" id="tab-btn-members" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center space-x-1.5 cursor-pointer">
           <i data-lucide="users" class="w-4 h-4"></i>
           <span>Danh Bạ</span>
         </button>
-        <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center space-x-1.5">
+        <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center space-x-1.5 cursor-pointer">
           <i data-lucide="settings" class="w-4 h-4"></i>
           <span>Cài Đặt</span>
         </button>
@@ -352,40 +358,63 @@ app.get('*', (c) => {
 
       <!-- Upload Section -->
       <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-4">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 class="text-base font-semibold text-slate-900 flex items-center space-x-2">
               <span class="flex items-center justify-center w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold">1</span>
               <span>Tải Hóa Đơn ShopeeFood / GrabFood</span>
             </h2>
-            <p class="text-xs text-slate-500 mt-0.5">Kéo thả ảnh, chọn file hoặc dán trực tiếp (Ctrl + V)</p>
+            <p class="text-xs text-slate-500 mt-0.5">Hỗ trợ tải 1 hoặc nhiều ảnh chụp nối tiếp nếu hóa đơn dài. Dán trực tiếp (Ctrl + V) hoặc bấm nút.</p>
           </div>
-          <span id="scan-status-pill" class="hidden text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600"></span>
+          <button type="button" onclick="document.getElementById('file-input').click()" class="self-start sm:self-auto bg-brand-50 hover:bg-brand-100 text-brand-700 font-semibold px-4 py-2 rounded-xl text-sm border border-brand-200 transition-all flex items-center space-x-2 cursor-pointer shadow-sm">
+            <i data-lucide="upload" class="w-4 h-4"></i>
+            <span>Chọn ảnh hóa đơn</span>
+          </button>
         </div>
 
-        <div id="drop-zone" class="border-2 border-dashed border-slate-300 hover:border-brand-500 rounded-xl p-8 text-center transition-colors cursor-pointer bg-slate-50/50 hover:bg-brand-50/20">
-          <input type="file" id="file-input" accept="image/*" class="hidden">
+        <input type="file" id="file-input" accept="image/*" multiple class="hidden">
+
+        <!-- Drop zone: Click to upload when empty -->
+        <div id="drop-zone" onclick="document.getElementById('file-input').click()" class="border-2 border-dashed border-slate-300 hover:border-brand-500 rounded-xl p-8 text-center transition-colors cursor-pointer bg-slate-50/50 hover:bg-brand-50/20">
           <div id="drop-prompt" class="space-y-3">
             <div class="w-12 h-12 rounded-full bg-brand-50 text-brand-600 mx-auto flex items-center justify-center">
               <i data-lucide="image-up" class="w-6 h-6"></i>
             </div>
             <div class="text-sm text-slate-600">
-              <span class="font-semibold text-brand-600 hover:underline">Bấm để chọn ảnh</span> hoặc kéo ảnh vào đây
+              <span class="font-semibold text-brand-600 hover:underline">Bấm để chọn 1 hoặc nhiều ảnh</span> hoặc kéo ảnh vào đây
             </div>
-            <p class="text-xs text-slate-400">Hỗ trợ PNG, JPG, JPEG, WebP</p>
+            <p class="text-xs text-slate-400">Hỗ trợ PNG, JPG, JPEG, WebP (Có thể chọn nhiều ảnh liên tiếp nếu hóa đơn dài)</p>
+          </div>
+        </div>
+
+        <!-- Preview Gallery & Actions (OUTSIDE drop-zone to avoid pop-up bug) -->
+        <div id="preview-container" class="hidden space-y-4 pt-2">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+            <div class="text-sm font-semibold text-slate-700 flex items-center space-x-2">
+              <i data-lucide="images" class="w-4 h-4 text-brand-600"></i>
+              <span>Danh sách ảnh đã chọn (<span id="images-count">0</span> ảnh)</span>
+            </div>
+            <button type="button" onclick="document.getElementById('file-input').click()" class="text-xs font-medium text-brand-600 hover:text-brand-700 flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-brand-50 hover:bg-brand-100 transition-colors cursor-pointer">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Thêm ảnh nối tiếp</span>
+            </button>
           </div>
 
-          <div id="preview-container" class="hidden space-y-4">
-            <img id="image-preview" src="" alt="Hóa đơn" class="max-h-64 mx-auto rounded-lg shadow-sm border border-slate-200 object-contain">
-            <div class="flex items-center justify-center space-x-3">
-              <button onclick="triggerScan()" id="btn-scan" class="bg-brand-600 hover:bg-brand-700 text-white font-medium px-5 py-2 rounded-xl text-sm shadow-md shadow-brand-600/20 transition-all flex items-center space-x-2">
-                <i data-lucide="sparkles" class="w-4 h-4"></i>
-                <span>Bóc Tách Hóa Đơn Bằng AI</span>
-              </button>
-              <button onclick="resetImage()" class="text-slate-500 hover:text-slate-700 text-sm px-3 py-2">
-                Đổi ảnh khác
-              </button>
-            </div>
+          <!-- Thumbnails grid -->
+          <div id="images-gallery" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            <!-- Dynamic thumbnails rendered in JS -->
+          </div>
+
+          <!-- Action buttons -->
+          <div class="flex flex-wrap items-center justify-center gap-3 pt-3">
+            <button type="button" onclick="triggerScan()" id="btn-scan" class="bg-brand-600 hover:bg-brand-700 text-white font-medium px-6 py-2.5 rounded-xl text-sm shadow-md shadow-brand-600/20 transition-all flex items-center space-x-2 cursor-pointer">
+              <i data-lucide="sparkles" class="w-4 h-4"></i>
+              <span>Bóc Tách Hóa Đơn Bằng AI</span>
+            </button>
+            <button type="button" onclick="resetAllImages()" class="text-slate-500 hover:text-red-600 text-sm px-4 py-2.5 rounded-xl border border-slate-200 hover:border-red-200 hover:bg-red-50 transition-colors flex items-center space-x-1.5 cursor-pointer">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+              <span>Xóa hết ảnh</span>
+            </button>
           </div>
         </div>
       </div>
@@ -413,26 +442,26 @@ app.get('*', (c) => {
             </div>
             <div>
               <label class="block text-xs font-medium text-slate-500 mb-1">Tổng Tiền Gốc Các Món</label>
-              <input type="number" id="input-subtotal" oninput="recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
+              <input type="text" id="input-subtotal" oninput="this.value = formatInput(this.value); recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
             </div>
             <div>
               <label class="block text-xs font-medium text-slate-500 mb-1">Voucher Giảm Món</label>
-              <input type="number" id="input-discount-items" oninput="recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-emerald-600 font-medium focus:outline-none focus:border-brand-500">
+              <input type="text" id="input-discount-items" oninput="this.value = formatInput(this.value); recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-emerald-600 font-medium focus:outline-none focus:border-brand-500">
             </div>
             <div>
               <label class="block text-xs font-medium text-slate-500 mb-1">Phí Ship Thực Tế</label>
-              <input type="number" id="input-shipping-net" oninput="recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-sky-600 font-medium focus:outline-none focus:border-brand-500">
+              <input type="text" id="input-shipping-net" oninput="this.value = formatInput(this.value); recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-sky-600 font-medium focus:outline-none focus:border-brand-500">
             </div>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
             <div>
               <label class="block text-xs font-medium text-slate-500 mb-1">Phí Dịch Vụ / Phụ Phí</label>
-              <input type="number" id="input-service-fee" oninput="recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
+              <input type="text" id="input-service-fee" oninput="this.value = formatInput(this.value); recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
             </div>
             <div>
               <label class="block text-xs font-medium text-slate-500 mb-1">Tổng Bill Thực Trả (App)</label>
-              <input type="number" id="input-final-total" oninput="recalculate()" class="w-full text-sm font-bold text-brand-600 border border-brand-300 bg-brand-50/30 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
+              <input type="text" id="input-final-total" oninput="this.value = formatInput(this.value); recalculate()" class="w-full text-sm font-bold text-brand-600 border border-brand-300 bg-brand-50/30 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
             </div>
             <div>
               <label class="block text-xs font-medium text-slate-500 mb-1">Tài Khoản Nhận Chuyển Khoản</label>
@@ -448,9 +477,9 @@ app.get('*', (c) => {
           <div class="flex items-center justify-between border-b border-slate-100 pb-3">
             <div class="flex items-center space-x-2">
               <span class="flex items-center justify-center w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold">3</span>
-              <h2 class="text-base font-semibold text-slate-900">Chi Tiết Món Ăn & Ánh Xạ Người Đặt</h2>
+              <h2 class="text-base font-semibold text-slate-900">Chi tiết món ăn và giá tiền cụ thể</h2>
             </div>
-            <button onclick="addNewDishRow()" class="text-brand-600 hover:text-brand-700 text-xs font-medium flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand-50">
+            <button type="button" onclick="addNewDishRow()" class="text-brand-600 hover:text-brand-700 text-xs font-medium flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand-50 cursor-pointer">
               <i data-lucide="plus" class="w-3.5 h-3.5"></i>
               <span>Thêm món</span>
             </button>
@@ -506,11 +535,11 @@ app.get('*', (c) => {
 
           <!-- Action Buttons -->
           <div class="pt-4 flex flex-wrap items-center justify-end gap-3 border-t border-slate-100">
-            <button onclick="copyZaloText()" class="bg-slate-800 hover:bg-slate-900 text-white font-medium px-4 py-2.5 rounded-xl text-sm transition-all flex items-center space-x-2">
+            <button type="button" onclick="copyZaloText()" class="bg-slate-800 hover:bg-slate-900 text-white font-medium px-4 py-2.5 rounded-xl text-sm transition-all flex items-center space-x-2 cursor-pointer">
               <i data-lucide="copy" class="w-4 h-4"></i>
               <span>Copy Bảng Kê (Zalo / Slack)</span>
             </button>
-            <button onclick="sendEmails()" id="btn-send-emails" class="bg-brand-600 hover:bg-brand-700 text-white font-medium px-5 py-2.5 rounded-xl text-sm shadow-md shadow-brand-600/20 transition-all flex items-center space-x-2">
+            <button type="button" onclick="sendEmails()" id="btn-send-emails" class="bg-brand-600 hover:bg-brand-700 text-white font-medium px-5 py-2.5 rounded-xl text-sm shadow-md shadow-brand-600/20 transition-all flex items-center space-x-2 cursor-pointer">
               <i data-lucide="send" class="w-4 h-4"></i>
               <span>Gửi Email Cá Nhân (Gmail)</span>
             </button>
@@ -541,7 +570,7 @@ app.get('*', (c) => {
             <input type="email" id="member-email-input" placeholder="dongnghiep@company.com" required class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-500">
           </div>
           <div class="flex items-end">
-            <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5">
+            <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5 cursor-pointer">
               <i data-lucide="user-plus" class="w-4 h-4"></i>
               <span>Lưu Thành Viên</span>
             </button>
@@ -607,7 +636,7 @@ app.get('*', (c) => {
             <input type="text" id="acc-holder" placeholder="NGUYEN VAN A" required class="w-full text-sm uppercase border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-500">
           </div>
           <div class="flex items-end">
-            <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5">
+            <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5 cursor-pointer">
               <i data-lucide="plus" class="w-4 h-4"></i>
               <span>Thêm STK</span>
             </button>
@@ -636,7 +665,7 @@ app.get('*', (c) => {
             <input type="email" id="setting-admin-email" placeholder="alviss@gmail.com" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
           </div>
           <div class="flex justify-end space-x-3 pt-2">
-            <button onclick="saveSettings()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-5 py-2 rounded-xl shadow-md shadow-brand-600/20 transition-all flex items-center space-x-1.5">
+            <button type="button" onclick="saveSettings()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-5 py-2 rounded-xl shadow-md shadow-brand-600/20 transition-all flex items-center space-x-1.5 cursor-pointer">
               <i data-lucide="save" class="w-4 h-4"></i>
               <span>Lưu Cài Đặt</span>
             </button>
@@ -653,13 +682,13 @@ app.get('*', (c) => {
     <div class="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 text-center shadow-xl">
       <div class="flex justify-between items-center border-b border-slate-100 pb-3">
         <h3 id="qr-modal-title" class="font-bold text-slate-900 text-base">Thanh Toán VietQR</h3>
-        <button onclick="closeQrModal()" class="text-slate-400 hover:text-slate-600">
+        <button type="button" onclick="closeQrModal()" class="text-slate-400 hover:text-slate-600 cursor-pointer">
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
       <img id="qr-modal-img" src="" alt="Mã VietQR" class="mx-auto rounded-xl border border-slate-200 shadow-sm w-64 h-64 object-contain">
       <div id="qr-modal-info" class="text-xs text-slate-600 bg-slate-50 p-3 rounded-lg text-left space-y-1"></div>
-      <button onclick="closeQrModal()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2 rounded-xl text-sm">
+      <button type="button" onclick="closeQrModal()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2 rounded-xl text-sm cursor-pointer">
         Đóng
       </button>
     </div>
@@ -667,12 +696,35 @@ app.get('*', (c) => {
 
   <script>
     // State
-    let currentImageBase64 = null;
+    let uploadedImages = []; // Array of { id, name, base64 }
     let scannedDishes = [];
     let paymentAccounts = [];
     let membersList = [];
     let currentSettlements = [];
-    // Helper Format VND
+
+    // Helper: Định dạng số có dấu phẩy ngăn cách hàng nghìn (ví dụ: 33,000)
+    function formatNumber(num) {
+      if (num === undefined || num === null || num === '') return '0';
+      const n = parseInt(String(num).replace(/[^0-9]/g, ''), 10);
+      if (isNaN(n)) return '0';
+      return n.toLocaleString('en-US');
+    }
+
+    // Helper: Tự format dấu phẩy khi người dùng đang gõ
+    function formatInput(val) {
+      const digits = String(val).replace(/[^0-9]/g, '');
+      if (!digits) return '';
+      return parseInt(digits, 10).toLocaleString('en-US');
+    }
+
+    // Helper: Parse chuỗi có dấu phẩy về số nguyên
+    function parseNumber(val) {
+      if (!val) return 0;
+      const digits = String(val).replace(/[^0-9]/g, '');
+      return parseInt(digits, 10) || 0;
+    }
+
+    // Helper Format VND (ví dụ: 33.000 đ)
     function formatVND(num) {
       if (!num) return '0 đ';
       return Number(num).toLocaleString('vi-VN') + ' đ';
@@ -703,14 +755,11 @@ app.get('*', (c) => {
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
 
-    dropZone.addEventListener('click', (e) => {
-      if (e.target.closest('button')) return;
-      fileInput.click();
-    });
-
     fileInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (file) handleImageFile(file);
+      if (e.target.files && e.target.files.length) {
+        handleImageFiles(e.target.files);
+        fileInput.value = ''; // Reset input để có thể chọn lại cùng file
+      }
     });
 
     dropZone.addEventListener('dragover', (e) => {
@@ -725,54 +774,109 @@ app.get('*', (c) => {
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.classList.remove('border-brand-500', 'bg-brand-50/20');
-      if (e.dataTransfer.files.length) {
-        handleImageFile(e.dataTransfer.files[0]);
+      if (e.dataTransfer.files && e.dataTransfer.files.length) {
+        handleImageFiles(e.dataTransfer.files);
       }
     });
 
     window.addEventListener('paste', (e) => {
       const items = e.clipboardData.items;
+      const files = [];
       for (let i = 0; i < items.length; i++) {
         if (items[i].type.indexOf('image') !== -1) {
           const file = items[i].getAsFile();
-          handleImageFile(file);
-          break;
+          if (file) files.push(file);
         }
+      }
+      if (files.length) {
+        handleImageFiles(files);
       }
     });
 
-    function handleImageFile(file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        currentImageBase64 = e.target.result;
-        document.getElementById('image-preview').src = currentImageBase64;
-        document.getElementById('drop-prompt').classList.add('hidden');
-        document.getElementById('preview-container').classList.remove('hidden');
-      };
-      reader.readAsDataURL(file);
+    function handleImageFiles(files) {
+      if (!files || !files.length) return;
+      Array.from(files).forEach((file) => {
+        if (!file.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          uploadedImages.push({
+            id: Date.now() + Math.random().toString(36).substring(2, 6),
+            name: file.name || 'Ảnh hóa đơn',
+            base64: e.target.result,
+          });
+          renderImageGallery();
+        };
+        reader.readAsDataURL(file);
+      });
     }
 
-    function resetImage() {
-      currentImageBase64 = null;
+    function renderImageGallery() {
+      const container = document.getElementById('preview-container');
+      const dropZone = document.getElementById('drop-zone');
+      const gallery = document.getElementById('images-gallery');
+      const countSpan = document.getElementById('images-count');
+
+      if (!uploadedImages.length) {
+        dropZone.classList.remove('hidden');
+        container.classList.add('hidden');
+        return;
+      }
+
+      dropZone.classList.add('hidden');
+      container.classList.remove('hidden');
+      countSpan.textContent = uploadedImages.length;
+      gallery.innerHTML = '';
+
+      uploadedImages.forEach((img, idx) => {
+        const card = document.createElement('div');
+        card.className = 'relative group border border-slate-200 rounded-xl overflow-hidden bg-slate-50 shadow-sm';
+        card.innerHTML = \`
+          <div class="aspect-[3/4] overflow-hidden bg-slate-100 flex items-center justify-center p-1">
+            <img src="\${img.base64}" alt="Ảnh \${idx + 1}" class="w-full h-full object-contain">
+          </div>
+          <div class="p-2 bg-white flex items-center justify-between text-xs border-t border-slate-100">
+            <span class="font-bold text-slate-700">Phần \${idx + 1}</span>
+            <button type="button" onclick="removeImage(\${idx})" class="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-red-50 transition-colors cursor-pointer" title="Xóa ảnh này">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        \`;
+        gallery.appendChild(card);
+      });
+      lucide.createIcons();
+    }
+
+    function removeImage(idx) {
+      uploadedImages.splice(idx, 1);
+      renderImageGallery();
+      if (!uploadedImages.length) {
+        document.getElementById('result-section').classList.add('hidden');
+      }
+    }
+
+    function resetAllImages() {
+      uploadedImages = [];
       document.getElementById('file-input').value = '';
-      document.getElementById('drop-prompt').classList.remove('hidden');
-      document.getElementById('preview-container').classList.add('hidden');
+      renderImageGallery();
       document.getElementById('result-section').classList.add('hidden');
     }
 
-    // Scan Bill via AI
+    // Scan Bill via AI (Gửi mảng nhiều ảnh)
     async function triggerScan() {
-      if (!currentImageBase64) return;
+      if (!uploadedImages.length) {
+        alert('Vui lòng chọn ít nhất 1 ảnh hóa đơn!');
+        return;
+      }
       const btn = document.getElementById('btn-scan');
       btn.disabled = true;
-      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Đang bóc tách dữ liệu AI...</span>';
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Đang bóc tách dữ liệu AI (' + uploadedImages.length + ' ảnh)...</span>';
       lucide.createIcons();
 
       try {
         const res = await fetch('/api/scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_base64: currentImageBase64 }),
+          body: JSON.stringify({ images_base64: uploadedImages.map(img => img.base64) }),
         });
         const data = await res.json();
         if (!data.success) {
@@ -782,13 +886,13 @@ app.get('*', (c) => {
 
         const bill = data.data;
         document.getElementById('input-store-name').value = bill.store_name || '';
-        document.getElementById('input-subtotal').value = bill.subtotal || 0;
-        document.getElementById('input-discount-items').value = bill.discount_items || 0;
+        document.getElementById('input-subtotal').value = formatNumber(bill.subtotal || 0);
+        document.getElementById('input-discount-items').value = formatNumber(bill.discount_items || 0);
         
         const shipNet = (bill.shipping_fee || 0) - (bill.discount_shipping || 0);
-        document.getElementById('input-shipping-net').value = shipNet > 0 ? shipNet : 0;
-        document.getElementById('input-service-fee').value = bill.service_fee || 0;
-        document.getElementById('input-final-total').value = bill.final_total || 0;
+        document.getElementById('input-shipping-net').value = formatNumber(shipNet > 0 ? shipNet : 0);
+        document.getElementById('input-service-fee').value = formatNumber(bill.service_fee || 0);
+        document.getElementById('input-final-total').value = formatNumber(bill.final_total || 0);
 
         scannedDishes = (bill.items || []).map(item => ({
           user_name: item.matched_user_name || item.raw_user_name || 'Khách',
@@ -813,7 +917,7 @@ app.get('*', (c) => {
       }
     }
 
-    // Render Dishes Table
+    // Render Dishes Table (Thêm dấu phẩy vào giá gốc)
     function renderDishesTable() {
       const tbody = document.getElementById('dishes-tbody');
       tbody.innerHTML = '';
@@ -822,22 +926,22 @@ app.get('*', (c) => {
         const tr = document.createElement('tr');
         tr.innerHTML = \`
           <td class="p-3">
-            <input type="text" value="\${d.user_name}" onchange="updateDish(\${idx}, 'user_name', this.value)" class="w-full text-sm font-medium border border-slate-200 rounded px-2 py-1 focus:border-brand-500">
+            <input type="text" value="\${d.user_name}" onchange="updateDish(\${idx}, 'user_name', this.value)" class="w-full text-sm font-medium border border-slate-200 rounded px-2 py-1 focus:border-brand-500 focus:outline-none">
           </td>
           <td class="p-3">
-            <input type="email" value="\${d.email}" placeholder="email@company.com" onchange="updateDish(\${idx}, 'email', this.value)" class="w-full text-xs text-slate-600 border border-slate-200 rounded px-2 py-1 focus:border-brand-500">
+            <input type="email" value="\${d.email}" placeholder="email@company.com" onchange="updateDish(\${idx}, 'email', this.value)" class="w-full text-xs text-slate-600 border border-slate-200 rounded px-2 py-1 focus:border-brand-500 focus:outline-none">
           </td>
           <td class="p-3">
-            <input type="text" value="\${d.dish_name}" onchange="updateDish(\${idx}, 'dish_name', this.value)" class="w-full text-sm border border-slate-200 rounded px-2 py-1 focus:border-brand-500">
+            <input type="text" value="\${d.dish_name}" onchange="updateDish(\${idx}, 'dish_name', this.value)" class="w-full text-sm border border-slate-200 rounded px-2 py-1 focus:border-brand-500 focus:outline-none">
           </td>
           <td class="p-3 text-center">
-            <input type="number" min="1" value="\${d.quantity}" onchange="updateDish(\${idx}, 'quantity', parseInt(this.value)||1)" class="w-14 text-center text-sm border border-slate-200 rounded px-1 py-1">
+            <input type="number" min="1" value="\${d.quantity}" onchange="updateDish(\${idx}, 'quantity', parseInt(this.value)||1)" class="w-14 text-center text-sm border border-slate-200 rounded px-1 py-1 focus:outline-none">
           </td>
           <td class="p-3 text-right">
-            <input type="number" value="\${d.price}" onchange="updateDish(\${idx}, 'price', parseInt(this.value)||0)" class="w-24 text-right text-sm font-semibold border border-slate-200 rounded px-2 py-1">
+            <input type="text" value="\${formatNumber(d.price)}" oninput="this.value = formatInput(this.value)" onchange="updateDish(\${idx}, 'price', parseNumber(this.value))" class="w-28 text-right text-sm font-semibold border border-slate-200 rounded px-2 py-1 focus:border-brand-500 focus:outline-none">
           </td>
           <td class="p-3 text-center">
-            <button onclick="removeDishRow(\${idx})" class="text-slate-400 hover:text-red-500 p-1">
+            <button type="button" onclick="removeDishRow(\${idx})" class="text-slate-400 hover:text-red-500 p-1 cursor-pointer">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
           </td>
@@ -872,11 +976,11 @@ app.get('*', (c) => {
 
     // Calculation Algorithm (Thuật toán chia tiền)
     function recalculate() {
-      const subtotal = parseInt(document.getElementById('input-subtotal').value) || 0;
-      const discountItems = parseInt(document.getElementById('input-discount-items').value) || 0;
-      const shippingNet = parseInt(document.getElementById('input-shipping-net').value) || 0;
-      const serviceFee = parseInt(document.getElementById('input-service-fee').value) || 0;
-      const finalTotal = parseInt(document.getElementById('input-final-total').value) || 0;
+      const subtotal = parseNumber(document.getElementById('input-subtotal').value);
+      const discountItems = parseNumber(document.getElementById('input-discount-items').value);
+      const shippingNet = parseNumber(document.getElementById('input-shipping-net').value);
+      const serviceFee = parseNumber(document.getElementById('input-service-fee').value);
+      const finalTotal = parseNumber(document.getElementById('input-final-total').value);
 
       // Gom theo người đặt
       const userMap = {};
@@ -910,11 +1014,9 @@ app.get('*', (c) => {
 
       let calculatedSum = 0;
       currentSettlements = users.map(u => {
-        // Tỷ lệ giảm giá món theo giá gốc
         const discountRatio = totalItemsCost > 0 ? (u.totalOriginal / totalItemsCost) : (1 / userCount);
         const myDiscount = Math.round(discountItems * discountRatio);
         
-        // Làm tròn đến nghìn
         let rawPay = u.totalOriginal - myDiscount + sharedFeePerPerson;
         let roundedPay = Math.round(rawPay / 1000) * 1000;
         calculatedSum += roundedPay;
@@ -967,7 +1069,7 @@ app.get('*', (c) => {
           <td class="p-3 text-right text-sky-600 font-medium">+\${formatVND(s.shipping)}</td>
           <td class="p-3 text-right font-bold text-brand-600 text-base">\${formatVND(s.finalAmount)}</td>
           <td class="p-3 text-center">
-            \${s.vietqrUrl ? \`<button onclick="openQrModal(\${idx})" class="text-xs font-semibold px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center space-x-1">
+            \${s.vietqrUrl ? \`<button type="button" onclick="openQrModal(\${idx})" class="text-xs font-semibold px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center space-x-1 cursor-pointer">
               <i data-lucide="qr-code" class="w-3.5 h-3.5"></i>
               <span>Xem QR</span>
             </button>\` : '<span class="text-xs text-slate-400">Thiếu STK</span>'}
@@ -1098,7 +1200,7 @@ app.get('*', (c) => {
           <td class="p-3 font-semibold text-slate-800">\${m.name}</td>
           <td class="p-3 text-slate-600">\${m.email}</td>
           <td class="p-3 text-center">
-            <button onclick="deleteMember(\${m.id})" class="text-slate-400 hover:text-red-500 p-1">
+            <button type="button" onclick="deleteMember(\${m.id})" class="text-slate-400 hover:text-red-500 p-1 cursor-pointer">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
           </td>
@@ -1174,8 +1276,8 @@ app.get('*', (c) => {
             </div>
           </div>
           <div class="flex items-center space-x-2">
-            \${!a.is_default ? \`<button onclick="setDefaultAccount(\${a.id})" class="text-xs text-slate-600 hover:text-brand-600 px-2 py-1 rounded border border-slate-200">Đặt mặc định</button>\` : ''}
-            <button onclick="deletePaymentAccount(\${a.id})" class="text-slate-400 hover:text-red-500 p-1">
+            \${!a.is_default ? \`<button type="button" onclick="setDefaultAccount(\${a.id})" class="text-xs text-slate-600 hover:text-brand-600 px-2 py-1 rounded border border-slate-200 cursor-pointer">Đặt mặc định</button>\` : ''}
+            <button type="button" onclick="deletePaymentAccount(\${a.id})" class="text-slate-400 hover:text-red-500 p-1 cursor-pointer">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
           </div>
