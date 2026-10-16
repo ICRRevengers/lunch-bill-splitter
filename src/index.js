@@ -2671,7 +2671,7 @@ app.get('*', async (c) => {
             : '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">👤 Guest</span>';
           const deleteBtn = isUAdmin || u.username === 'phupx1'
             ? '<span class="text-xs text-slate-300 cursor-not-allowed" title="Không thể xóa Admin">—</span>'
-            : '<button type="button" onclick="deleteUser(' + u.id + ', \'' + u.username + '\')" class="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer" title="Xóa tài khoản"><i data-lucide="trash-2" class="w-4 h-4"></i></button>';
+            : '<button type="button" data-id="' + u.id + '" data-username="' + u.username + '" onclick="confirmDeleteUser(this)" class="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer" title="Xóa tài khoản"><i data-lucide="trash-2" class="w-4 h-4"></i></button>';
           return '<tr class="hover:bg-slate-50/70 transition-colors">' +
             '<td class="p-3 font-mono font-semibold text-slate-800">' + u.username + '</td>' +
             '<td class="p-3 text-slate-700">' + (u.full_name || '—') + '</td>' +
@@ -2686,7 +2686,9 @@ app.get('*', async (c) => {
       }
     }
 
-    async function deleteUser(id, username) {
+    async function confirmDeleteUser(btn) {
+      const id = btn.getAttribute('data-id');
+      const username = btn.getAttribute('data-username');
       if (!confirm('Bạn có chắc chắn muốn xóa tài khoản "' + username + '"?')) return;
       try {
         const res = await fetch('/api/users/' + id, { method: 'DELETE' });
