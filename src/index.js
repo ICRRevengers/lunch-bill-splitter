@@ -899,8 +899,8 @@ app.get('*', async (c) => {
     <div id="tab-members" class="hidden space-y-6">
       <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-5">
         <div>
-          <h2 class="text-base font-semibold text-slate-900">Danh Bạ Ánh Xạ Tên ↔ Email</h2>
-          <p class="text-xs text-slate-500 mt-1">Danh bạ này được lưu trong Cloudflare D1 và tự động nạp vào AI khi scan để gán email chính xác.</p>
+          <h2 class="text-base font-semibold text-slate-900">Các thành viên và tài khoản</h2>
+          <p class="text-xs text-slate-500 mt-1">Dưới đây là danh sách các thành viên của ODC và email của họ. Thu thập email để gửi Spilt Bill gửi hóa đơn ăn uống tới tận giường.</p>
         </div>
 
         <!-- Add Form -->
