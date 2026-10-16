@@ -13,6 +13,7 @@
     "hono": "^4.13.13"
   },
   "devDependencies": {
+    "@google/clasp": "^3.4.1",
     "wrangler": "^4.86.0"
   }
 }

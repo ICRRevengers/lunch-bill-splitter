@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 
 const app = new Hono();
 
@@ -10,6 +11,107 @@ function formatVND(num) {
   if (!num) return '0 đ';
   return Number(num).toLocaleString('vi-VN') + ' đ';
 }
+
+// ==============================================================================
+// AUTHENTICATION & SECURITY HELPERS
+// ==============================================================================
+async function getExpectedPassword(c) {
+  try {
+    const row = await c.env.DB.prepare("SELECT value FROM app_settings WHERE key = 'app_password'").first();
+    if (row && row.value) return row.value.trim();
+  } catch (e) {}
+  return (c.env.APP_PASSWORD || 'phupx1').trim();
+}
+
+async function signToken(password, timestamp) {
+  const data = new TextEncoder().encode(`lunch_auth_secret_v1:${timestamp}:${password}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyToken(c, token) {
+  if (!token || typeof token !== 'string') return false;
+  const parts = token.split('.');
+  if (parts.length !== 2) return false;
+  const [tsStr, signature] = parts;
+  const timestamp = parseInt(tsStr, 10);
+  if (isNaN(timestamp)) return false;
+
+  // Hết hạn sau 30 ngày
+  const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+  if (Date.now() - timestamp > MAX_AGE_MS || timestamp > Date.now() + 60000) {
+    return false;
+  }
+
+  const expectedPassword = await getExpectedPassword(c);
+  const expectedSig = await signToken(expectedPassword, timestamp);
+  return signature === expectedSig;
+}
+
+async function isAuthenticated(c) {
+  const token = getCookie(c, 'lunch_auth');
+  return await verifyToken(c, token);
+}
+
+// ------------------------------------------------------------------------------
+// AUTH ENDPOINTS: Login & Logout
+// ------------------------------------------------------------------------------
+app.post('/api/login', async (c) => {
+  try {
+    const { password } = await c.req.json();
+    const cleanPw = (password || '').trim();
+    const expected = await getExpectedPassword(c);
+
+    if (!cleanPw || cleanPw !== expected) {
+      return c.json({ success: false, error: 'Mật khẩu không chính xác' }, 401);
+    }
+
+    const timestamp = Date.now();
+    const signature = await signToken(expected, timestamp);
+    const token = `${timestamp}.${signature}`;
+
+    setCookie(c, 'lunch_auth', token, {
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      maxAge: 30 * 24 * 60 * 60, // 30 ngày
+    });
+
+    return c.json({ success: true, message: 'Đăng nhập thành công' });
+  } catch (err) {
+    return c.json({ success: false, error: err.message }, 500);
+  }
+});
+
+app.post('/api/logout', async (c) => {
+  deleteCookie(c, 'lunch_auth', { path: '/' });
+  return c.json({ success: true, message: 'Đã đăng xuất' });
+});
+
+// ------------------------------------------------------------------------------
+// MIDDLEWARE: Khóa toàn bộ /api/* (trừ login, logout, và lấy ảnh QR thanh toán)
+// ------------------------------------------------------------------------------
+app.use('/api/*', async (c, next) => {
+  const path = c.req.path;
+  if (
+    path === '/api/login' ||
+    path === '/api/logout' ||
+    (path.startsWith('/api/payment-accounts/') && path.endsWith('/qr'))
+  ) {
+    return await next();
+  }
+
+  if (!await isAuthenticated(c)) {
+    return c.json({
+      success: false,
+      error: 'Unauthorized: Bạn cần nhập mật khẩu để thực hiện thao tác này',
+    }, 401);
+  }
+
+  return await next();
+});
 
 // ==============================================================================
 // 1. API: MEMBERS (Danh bạ Tên <-> Email)
@@ -239,9 +341,18 @@ app.post('/api/scan', async (c) => {
           for (let j = 0; j < len; j++) {
             bytes[j] = binaryStr.charCodeAt(j);
           }
-          const key = `bill_${Date.now()}_part${i + 1}_${Math.random().toString(36).substring(2, 6)}.jpg`;
+          let contentType = 'image/webp';
+          let ext = 'webp';
+          if (images[i].includes('image/png')) {
+            contentType = 'image/png';
+            ext = 'png';
+          } else if (images[i].includes('image/jpeg')) {
+            contentType = 'image/jpeg';
+            ext = 'jpg';
+          }
+          const key = `bill_${Date.now()}_part${i + 1}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
           await c.env.BUCKET.put(key, bytes, {
-            httpMetadata: { contentType: 'image/jpeg' },
+            httpMetadata: { contentType },
           });
           imageR2Keys.push(key);
         } catch (r2Err) {
@@ -345,9 +456,136 @@ app.post('/api/notify', async (c) => {
 });
 
 // ==============================================================================
-// 6. FRONTEND: SINGLE-PAGE WEB APP
+// 6. FRONTEND: LOGIN PAGE & MAIN WEB APP
 // ==============================================================================
-app.get('*', (c) => {
+function renderLoginPage() {
+  return `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Đăng Nhập — Lunch Bill Splitter</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#fff7ed',
+              100: '#ffedd5',
+              500: '#f97316',
+              600: '#ea580c',
+              700: '#c2410c',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-gradient-to-br from-slate-100 via-orange-50/40 to-slate-100 text-slate-800 min-h-screen flex items-center justify-center p-4 font-sans antialiased">
+  <div class="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200 shadow-xl space-y-6">
+    <div class="text-center space-y-2">
+      <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-amber-500 mx-auto flex items-center justify-center text-white shadow-lg shadow-brand-500/30">
+        <i data-lucide="receipt" class="w-7 h-7"></i>
+      </div>
+      <h1 class="text-2xl font-bold text-slate-900">Lunch Bill Splitter</h1>
+      <p class="text-xs text-slate-500">Hệ thống bóc tách hóa đơn & chia tiền ăn trưa nội bộ</p>
+    </div>
+
+    <form onsubmit="handleLogin(event)" class="space-y-4">
+      <div id="login-error" class="hidden p-3 bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl flex items-center space-x-2">
+        <i data-lucide="alert-circle" class="w-4 h-4 shrink-0"></i>
+        <span id="login-error-msg">Mật khẩu không chính xác!</span>
+      </div>
+
+      <div class="space-y-1.5">
+        <label for="password" class="block text-xs font-semibold text-slate-700">Mật khẩu truy cập</label>
+        <div class="relative">
+          <input type="password" id="password" required autofocus placeholder="Nhập mật khẩu..." class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pr-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
+          <button type="button" onclick="togglePasswordVisibility()" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer">
+            <i id="eye-icon" data-lucide="eye" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" id="btn-login" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-semibold py-3 rounded-xl text-sm shadow-md shadow-brand-600/25 transition-all flex items-center justify-center space-x-2 cursor-pointer">
+        <i data-lucide="lock-open" class="w-4 h-4"></i>
+        <span>Mở Khóa Truy Cập</span>
+      </button>
+    </form>
+
+    <div class="text-center pt-2">
+      <p class="text-[11px] text-slate-400 flex items-center justify-center space-x-1">
+        <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-500"></i>
+        <span>Phiên đăng nhập được lưu an toàn 30 ngày</span>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    lucide.createIcons();
+    function togglePasswordVisibility() {
+      const input = document.getElementById('password');
+      const icon = document.getElementById('eye-icon');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.setAttribute('data-lucide', 'eye-off');
+      } else {
+        input.type = 'password';
+        icon.setAttribute('data-lucide', 'eye');
+      }
+      lucide.createIcons();
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const pwInput = document.getElementById('password');
+      const errBox = document.getElementById('login-error');
+      const errMsg = document.getElementById('login-error-msg');
+      const btn = document.getElementById('btn-login');
+
+      errBox.classList.add('hidden');
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Đang xác thực...</span>';
+      lucide.createIcons();
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwInput.value.trim() }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          window.location.reload();
+        } else {
+          errMsg.textContent = data.error || 'Mật khẩu không đúng!';
+          errBox.classList.remove('hidden');
+          pwInput.focus();
+          pwInput.select();
+        }
+      } catch (err) {
+        errMsg.textContent = 'Lỗi kết nối máy chủ: ' + err.message;
+        errBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="lock-open" class="w-4 h-4"></i><span>Mở Khóa Truy Cập</span>';
+        lucide.createIcons();
+      }
+    }
+  </script>
+</body>
+</html>`;
+}
+
+app.get('*', async (c) => {
+  if (!await isAuthenticated(c)) {
+    return c.html(renderLoginPage());
+  }
+
   return c.html(`<!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -400,21 +638,27 @@ app.get('*', (c) => {
         </div>
       </div>
 
-      <!-- Navigation Tabs -->
-      <nav class="flex space-x-1 bg-slate-100 p-1 rounded-xl text-sm font-medium">
-        <button onclick="switchTab('splitter')" id="tab-btn-splitter" class="tab-btn active px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer">
-          <i data-lucide="calculator" class="w-4 h-4"></i>
-          <span>Chia Tiền</span>
+      <!-- Navigation Tabs & Logout -->
+      <div class="flex items-center space-x-2">
+        <nav class="flex space-x-1 bg-slate-100 p-1 rounded-xl text-sm font-medium">
+          <button onclick="switchTab('splitter')" id="tab-btn-splitter" class="tab-btn active px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer">
+            <i data-lucide="calculator" class="w-4 h-4"></i>
+            <span>Chia Tiền</span>
+          </button>
+          <button onclick="switchTab('members')" id="tab-btn-members" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center space-x-1.5 cursor-pointer">
+            <i data-lucide="users" class="w-4 h-4"></i>
+            <span>Danh Bạ</span>
+          </button>
+          <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center space-x-1.5 cursor-pointer">
+            <i data-lucide="settings" class="w-4 h-4"></i>
+            <span>Cài Đặt</span>
+          </button>
+        </nav>
+        <button type="button" onclick="logout()" title="Đăng xuất" class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer border border-transparent hover:border-red-100 flex items-center space-x-1 text-xs font-medium">
+          <i data-lucide="log-out" class="w-4 h-4"></i>
+          <span class="hidden sm:inline">Thoát</span>
         </button>
-        <button onclick="switchTab('members')" id="tab-btn-members" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center space-x-1.5 cursor-pointer">
-          <i data-lucide="users" class="w-4 h-4"></i>
-          <span>Danh Bạ</span>
-        </button>
-        <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center space-x-1.5 cursor-pointer">
-          <i data-lucide="settings" class="w-4 h-4"></i>
-          <span>Cài Đặt</span>
-        </button>
-      </nav>
+      </div>
     </div>
   </header>
 
@@ -786,6 +1030,30 @@ app.get('*', (c) => {
         </div>
       </div>
 
+      <!-- Security / Password Config -->
+      <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-4">
+        <div>
+          <h2 class="text-base font-semibold text-slate-900 flex items-center space-x-2">
+            <i data-lucide="shield-check" class="w-5 h-5 text-brand-600"></i>
+            <span>Mật Khẩu Truy Cập Ứng Dụng</span>
+          </h2>
+          <p class="text-xs text-slate-500 mt-0.5">Mật khẩu dùng để mở khóa web app và bảo vệ các tính năng scan AI, gửi mail.</p>
+        </div>
+
+        <div class="space-y-4 max-w-md">
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Mật khẩu mới</label>
+            <input type="password" id="setting-app-password" placeholder="Nhập mật khẩu mới nếu muốn đổi..." class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
+          </div>
+          <div class="flex justify-start space-x-3 pt-1">
+            <button type="button" onclick="changeAppPassword()" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer shadow-sm">
+              <i data-lucide="key" class="w-3.5 h-3.5"></i>
+              <span>Cập Nhật Mật Khẩu</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
     </div>
 
   </main>
@@ -811,6 +1079,21 @@ app.get('*', (c) => {
       <button type="button" onclick="closeQrModal()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 rounded-xl text-sm transition-colors cursor-pointer">
         Đóng Cửa Sổ
       </button>
+    </div>
+  </div>
+
+  <!-- Lightbox Modal for Bill Images -->
+  <div id="lightbox-modal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target === this) closeLightbox()">
+    <div class="relative max-w-4xl w-full max-h-[92vh] flex flex-col items-center">
+      <div class="w-full flex justify-between items-center text-white pb-2 px-1">
+        <span id="lightbox-title" class="text-sm font-semibold">Ảnh hóa đơn</span>
+        <button type="button" onclick="closeLightbox()" class="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer">
+          <i data-lucide="x" class="w-6 h-6"></i>
+        </button>
+      </div>
+      <div class="overflow-auto max-h-[82vh] w-full flex items-center justify-center bg-slate-900/50 rounded-2xl p-2 border border-white/10">
+        <img id="lightbox-img" src="" alt="Hóa đơn phóng to" class="max-h-[80vh] max-w-full object-contain rounded-lg shadow-2xl">
+      </div>
     </div>
   </div>
 
@@ -913,21 +1196,65 @@ app.get('*', (c) => {
       }
     });
 
-    function handleImageFiles(files) {
-      if (!files || !files.length) return;
-      Array.from(files).forEach((file) => {
-        if (!file.type.startsWith('image/')) return;
+    // Hàm nén ảnh sang định dạng WebP (giảm >90% dung lượng, giữ nguyên độ nét cho AI)
+    function compressImageToWebP(file, maxWidth = 1600, quality = 0.85) {
+      return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            let width = img.width;
+            let height = img.height;
+
+            if (width > maxWidth || height > maxWidth) {
+              if (width > height) {
+                height = Math.round((height * maxWidth) / width);
+                width = maxWidth;
+              } else {
+                width = Math.round((width * maxWidth) / height);
+                height = maxWidth;
+              }
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            // Xuất WebP (nếu trình duyệt hỗ trợ, nếu không fallback sang JPEG)
+            let webpData = canvas.toDataURL('image/webp', quality);
+            if (!webpData.startsWith('data:image/webp')) {
+              webpData = canvas.toDataURL('image/jpeg', quality);
+            }
+            resolve(webpData);
+          };
+          img.onerror = reject;
+          img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function handleImageFiles(files) {
+      if (!files || !files.length) return;
+      const validFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+      if (!validFiles.length) return;
+
+      for (const file of validFiles) {
+        try {
+          const compressedB64 = await compressImageToWebP(file);
           uploadedImages.push({
             id: Date.now() + Math.random().toString(36).substring(2, 6),
             name: file.name || 'Ảnh hóa đơn',
-            base64: e.target.result,
+            base64: compressedB64,
           });
-          renderImageGallery();
-        };
-        reader.readAsDataURL(file);
-      });
+        } catch (err) {
+          console.error('Lỗi nén ảnh WebP:', err);
+        }
+      }
+      renderImageGallery();
     }
 
     function renderImageGallery() {
@@ -951,8 +1278,14 @@ app.get('*', (c) => {
         const card = document.createElement('div');
         card.className = 'relative group border border-slate-200 rounded-xl overflow-hidden bg-slate-50 shadow-sm';
         card.innerHTML = \`
-          <div class="aspect-[3/4] overflow-hidden bg-slate-100 flex items-center justify-center p-1">
+          <div onclick="openLightbox(\${idx})" class="aspect-[3/4] overflow-hidden bg-slate-100 flex items-center justify-center p-1 cursor-zoom-in relative">
             <img src="\${img.base64}" alt="Ảnh \${idx + 1}" class="w-full h-full object-contain">
+            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center">
+              <span class="opacity-0 group-hover:opacity-100 bg-black/70 text-white text-[11px] px-2 py-1 rounded-lg backdrop-blur-sm transition-opacity flex items-center space-x-1 shadow-sm">
+                <i data-lucide="zoom-in" class="w-3.5 h-3.5"></i>
+                <span>Xem to</span>
+              </span>
+            </div>
           </div>
           <div class="p-2 bg-white flex items-center justify-between text-xs border-t border-slate-100">
             <span class="font-bold text-slate-700">Phần \${idx + 1}</span>
@@ -964,6 +1297,18 @@ app.get('*', (c) => {
         gallery.appendChild(card);
       });
       lucide.createIcons();
+    }
+
+    function openLightbox(idx) {
+      if (!uploadedImages[idx]) return;
+      document.getElementById('lightbox-title').textContent = 'Ảnh hóa đơn - Phần ' + (idx + 1) + ' / ' + uploadedImages.length;
+      document.getElementById('lightbox-img').src = uploadedImages[idx].base64;
+      document.getElementById('lightbox-modal').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeLightbox() {
+      document.getElementById('lightbox-modal').classList.add('hidden');
     }
 
     function removeImage(idx) {
@@ -1148,7 +1493,7 @@ app.get('*', (c) => {
         if (isMomo) {
           // Lấy mã QR MoMo cá nhân của Alviss tải lên (nếu có)
           if (bankAcc.qr_r2_key) {
-            qrCodeUrl = \`/api/payment-accounts/\${bankAcc.id}/qr\`;
+            qrCodeUrl = window.location.origin + \`/api/payment-accounts/\${bankAcc.id}/qr\`;
           }
         } else {
           // Sinh mã VietQR động có sẵn số tiền cho tài khoản ngân hàng
@@ -1750,6 +2095,41 @@ app.get('*', (c) => {
         alert('Đã lưu cấu hình thành công!');
       } else {
         alert(data.error);
+      }
+    }
+
+    async function logout() {
+      if (!confirm('Bạn có chắc chắn muốn đăng xuất?')) return;
+      try {
+        await fetch('/api/logout', { method: 'POST' });
+        window.location.reload();
+      } catch (err) {
+        window.location.reload();
+      }
+    }
+
+    async function changeAppPassword() {
+      const pwInput = document.getElementById('setting-app-password');
+      const newPassword = (pwInput.value || '').trim();
+      if (!newPassword) {
+        alert('Vui lòng nhập mật khẩu mới');
+        return;
+      }
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ app_password: newPassword }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert('Đã cập nhật mật khẩu mới thành công! Vui lòng ghi nhớ mật khẩu này.');
+          pwInput.value = '';
+        } else {
+          alert('Lỗi: ' + (data.error || 'Không đổi được mật khẩu'));
+        }
+      } catch (e) {
+        alert('Lỗi cập nhật mật khẩu: ' + e.message);
       }
     }
 
