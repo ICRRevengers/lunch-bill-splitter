@@ -653,7 +653,7 @@ app.get('*', async (c) => {
           <div>
             <h1 class="text-base sm:text-lg font-bold text-slate-900 leading-tight">Lunch Bill Splitter</h1>
             <p class="text-[11px] sm:text-xs text-slate-500 flex items-center space-x-1">
-              <span>Serverless on Cloudflare</span>
+              <span>By Alviss</span>
               <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
             </p>
           </div>
