@@ -65,4 +65,4 @@ npx wrangler secret put SCANNER_SECRET_TOKEN
 # Deploy worker
 npx wrangler deploy
 ```
-<!-- Cloudflare Workers Builds verification tag: 2026-10-16T08:24:30Z -->
+<!-- Cloudflare Workers Builds verification tag: 2026-10-16T08:31:30Z -->
