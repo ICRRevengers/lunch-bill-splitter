@@ -697,7 +697,7 @@ function renderLoginPage() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Đăng Nhập / Đăng Ký — Lunch Bill Splitter</title>
+  <title>Đăng Nhập / Đăng Ký — Bill Splitter</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script>
@@ -732,7 +732,7 @@ function renderLoginPage() {
       <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-amber-500 mx-auto flex items-center justify-center text-white shadow-lg shadow-brand-500/30">
         <i data-lucide="receipt" class="w-7 h-7"></i>
       </div>
-      <h1 class="text-2xl font-bold text-slate-900">Lunch Bill Splitter</h1>
+      <h1 class="text-2xl font-bold text-slate-900">Bill Splitter</h1>
       <p class="text-xs text-slate-500">Hệ thống bóc tách hóa đơn & chia tiền ăn trưa nội bộ</p>
     </div>
 
@@ -1003,7 +1003,7 @@ app.get('*', async (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lunch Bill Splitter — Quản Lý & Chia Tiền Cơm Trưa</title>
+  <title>Bill Splitter — Quản Lý & Chia Tiền Cơm Trưa</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script>
@@ -1045,7 +1045,7 @@ app.get('*', async (c) => {
           </div>
           <div>
             <div class="flex items-center space-x-1.5">
-              <h1 class="text-base sm:text-lg font-bold text-slate-900 leading-tight">Lunch Bill Splitter</h1>
+              <h1 class="text-base sm:text-lg font-bold text-slate-900 leading-tight">Bill Splitter</h1>
               <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${isAdmin ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
                 ${isAdmin ? '👑 ADMIN' : '👤 GUEST'}
               </span>
