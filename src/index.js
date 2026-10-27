@@ -104,10 +104,7 @@ async function ensureUsersTableAndSeeds(db) {
       await db.prepare("UPDATE users SET role = 'admin', password_hash = ? WHERE username = 'phupx1'").bind(adminHash).run();
     }
 
-    // 2. Dọn dẹp tài khoản guest cũ (kể cả haivnt1)
-    await db.prepare("DELETE FROM users WHERE role = 'guest' OR username = 'haivnt1'").run();
-
-    // 3. Tạo tài khoản Guest mới: oceanvo437@gmail.com với mật khẩu haivnt
+    // 2. Tạo tài khoản Guest mặc định (oceanvo437@gmail.com) nếu chưa có
     const guestEmail = 'oceanvo437@gmail.com';
     const guestPassHash = await hashPassword('haivnt');
     const guestFullName = 'Võ Nguyễn Trung Hải';
@@ -116,10 +113,14 @@ async function ensureUsersTableAndSeeds(db) {
       await db.prepare(
         "INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, 'guest', ?)"
       ).bind(guestEmail, guestPassHash, guestFullName).run();
+    }
+
+    // Đồng bộ tài khoản oceanvo437@gmail.com vào bảng members nếu tên chưa được cập nhật
+    const existingMember = await db.prepare("SELECT id FROM members WHERE LOWER(email) = ?").bind(guestEmail).first();
+    if (existingMember) {
+      await db.prepare("UPDATE members SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(guestFullName, existingMember.id).run();
     } else {
-      await db.prepare(
-        "UPDATE users SET password_hash = ?, role = 'guest', full_name = ? WHERE username = ?"
-      ).bind(guestPassHash, guestFullName, guestEmail).run();
+      await db.prepare("INSERT INTO members (name, email) VALUES (?, ?)").bind(guestFullName, guestEmail).run();
     }
 
     usersTableChecked = true;
@@ -286,10 +287,30 @@ app.post('/api/register', async (c) => {
     // Luôn luôn tạo với quyền guest
     const role = 'guest';
     const passwordHash = await hashPassword(cleanPw);
+    const memberName = cleanName || cleanEmail;
 
     const info = await c.env.DB.prepare(
       'INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, ?, ?)'
-    ).bind(cleanEmail, passwordHash, role, cleanName || cleanEmail).run();
+    ).bind(cleanEmail, passwordHash, role, memberName).run();
+
+    // Đồng bộ vào Account Section (bảng members):
+    // Nếu email đã tồn tại trong members -> chỉ cập nhật lại Tên thành viên (name).
+    // Nếu email chưa có -> thêm mới một dòng (name, email).
+    const existingMember = await c.env.DB.prepare(
+      'SELECT id, name FROM members WHERE LOWER(email) = ?'
+    ).bind(cleanEmail).first();
+
+    if (existingMember) {
+      if (cleanName && cleanName !== existingMember.name) {
+        await c.env.DB.prepare(
+          'UPDATE members SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+        ).bind(cleanName, existingMember.id).run();
+      }
+    } else {
+      await c.env.DB.prepare(
+        'INSERT INTO members (name, email) VALUES (?, ?)'
+      ).bind(memberName, cleanEmail).run();
+    }
 
     // Xóa record verification sau khi đăng ký thành công
     await c.env.DB.prepare('DELETE FROM email_verifications WHERE email = ?').bind(cleanEmail).run();
