@@ -67,7 +67,7 @@ async function getSessionUser(c) {
   return await verifyToken(c, token);
 }
 
-// Tự động khởi tạo bảng users và nạp tài khoản admin, guest demo mặc định
+// Tự động khởi tạo bảng users, otp verifications và nạp tài khoản admin, guest demo mặc định
 let usersTableChecked = false;
 async function ensureUsersTableAndSeeds(db) {
   if (usersTableChecked) return;
@@ -79,6 +79,15 @@ async function ensureUsersTableAndSeeds(db) {
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'guest',
         full_name TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run();
+
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS email_verifications (
+        email TEXT PRIMARY KEY,
+        otp_code TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `).run();
@@ -95,13 +104,22 @@ async function ensureUsersTableAndSeeds(db) {
       await db.prepare("UPDATE users SET role = 'admin', password_hash = ? WHERE username = 'phupx1'").bind(adminHash).run();
     }
 
-    // 2. Tạo tài khoản Demo haivnt1
-    const demoUser = await db.prepare("SELECT id FROM users WHERE username = 'haivnt1'").first();
-    if (!demoUser) {
-      const demoHash = await hashPassword('123456');
+    // 2. Dọn dẹp tài khoản guest cũ (kể cả haivnt1)
+    await db.prepare("DELETE FROM users WHERE role = 'guest' OR username = 'haivnt1'").run();
+
+    // 3. Tạo tài khoản Guest mới: oceanvo437@gmail.com với mật khẩu haivnt
+    const guestEmail = 'oceanvo437@gmail.com';
+    const guestPassHash = await hashPassword('haivnt');
+    const guestFullName = 'Võ Nguyễn Trung Hải';
+    const existingGuest = await db.prepare("SELECT id FROM users WHERE username = ?").bind(guestEmail).first();
+    if (!existingGuest) {
       await db.prepare(
-        "INSERT INTO users (username, password_hash, role, full_name) VALUES ('haivnt1', ?, 'guest', 'Hải VN')"
-      ).bind(demoHash).run();
+        "INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, 'guest', ?)"
+      ).bind(guestEmail, guestPassHash, guestFullName).run();
+    } else {
+      await db.prepare(
+        "UPDATE users SET password_hash = ?, role = 'guest', full_name = ? WHERE username = ?"
+      ).bind(guestPassHash, guestFullName, guestEmail).run();
     }
 
     usersTableChecked = true;
@@ -111,27 +129,94 @@ async function ensureUsersTableAndSeeds(db) {
 }
 
 // ------------------------------------------------------------------------------
-// AUTH ENDPOINTS: Login, Register & Logout
+// AUTH ENDPOINTS: OTP, Login, Register & Logout
 // ------------------------------------------------------------------------------
+app.post('/api/send-otp', async (c) => {
+  try {
+    await ensureUsersTableAndSeeds(c.env.DB);
+    const { email } = await c.req.json();
+    const cleanEmail = (email || '').trim().toLowerCase();
+
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      return c.json({ success: false, error: 'Địa chỉ email không hợp lệ' }, 400);
+    }
+
+    const existingUser = await c.env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(cleanEmail).first();
+    if (existingUser) {
+      return c.json({ success: false, error: 'Email này đã được đăng ký tài khoản. Vui lòng đăng nhập!' }, 400);
+    }
+
+    // Lấy GAS Web App URL để gửi email
+    const gasSetting = await c.env.DB.prepare("SELECT value FROM app_settings WHERE key = 'gas_url'").first();
+    const gasUrl = gasSetting ? gasSetting.value : null;
+
+    if (!gasUrl) {
+      return c.json({
+        success: false,
+        error: 'Hệ thống chưa cấu hình Google Apps Script để gửi email OTP. Vui lòng liên hệ Admin.',
+      }, 500);
+    }
+
+    const senderSetting = await c.env.DB.prepare("SELECT value FROM app_settings WHERE key = 'sender_name'").first();
+    const senderName = senderSetting && senderSetting.value ? senderSetting.value : 'Cơm Trưa Đồng Nghiệp';
+
+    // Tạo mã OTP ngẫu nhiên 6 chữ số
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // Hiệu lực 5 phút
+
+    // Lưu vào bảng email_verifications
+    await c.env.DB.prepare(
+      `INSERT INTO email_verifications (email, otp_code, expires_at) VALUES (?, ?, ?)
+       ON CONFLICT(email) DO UPDATE SET otp_code = excluded.otp_code, expires_at = excluded.expires_at, created_at = CURRENT_TIMESTAMP`
+    ).bind(cleanEmail, otpCode, expiresAt).run();
+
+    // Gọi Google Apps Script để gửi mail OTP
+    const mailRes = await fetch(gasUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'send_otp',
+        email: cleanEmail,
+        otp: otpCode,
+        sender_name: senderName,
+      }),
+    });
+
+    const mailData = await mailRes.json();
+    if (!mailData.success) {
+      return c.json({ success: false, error: 'Không thể gửi email OTP: ' + (mailData.error || 'Lỗi Mailer') }, 500);
+    }
+
+    return c.json({ success: true, message: 'Đã gửi mã xác thực OTP tới ' + cleanEmail + '. Vui lòng kiểm tra hộp thư!' });
+  } catch (err) {
+    return c.json({ success: false, error: err.message }, 500);
+  }
+});
+
 app.post('/api/login', async (c) => {
   try {
     await ensureUsersTableAndSeeds(c.env.DB);
-    const { username, password } = await c.req.json();
-    const cleanUser = (username || '').trim().toLowerCase();
+    const { email, password } = await c.req.json();
+    const cleanEmail = (email || '').trim().toLowerCase();
     const cleanPw = (password || '').trim();
 
-    if (!cleanUser || !cleanPw) {
-      return c.json({ success: false, error: 'Vui lòng nhập tên đăng nhập và mật khẩu' }, 400);
+    if (!cleanEmail || !cleanPw) {
+      return c.json({ success: false, error: 'Vui lòng nhập Email và mật khẩu' }, 400);
     }
 
-    const user = await c.env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(cleanUser).first();
+    // Chỉ cho phép đăng nhập bằng định dạng email (hoặc tài khoản admin phupx1)
+    if (!cleanEmail.includes('@') && cleanEmail !== 'phupx1') {
+      return c.json({ success: false, error: 'Hệ thống chỉ cho phép đăng nhập bằng Email!' }, 400);
+    }
+
+    const user = await c.env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(cleanEmail).first();
     if (!user) {
-      return c.json({ success: false, error: 'Tên đăng nhập hoặc mật khẩu không chính xác' }, 401);
+      return c.json({ success: false, error: 'Email hoặc mật khẩu không chính xác' }, 401);
     }
 
     const inputHash = await hashPassword(cleanPw);
     if (inputHash !== user.password_hash) {
-      return c.json({ success: false, error: 'Tên đăng nhập hoặc mật khẩu không chính xác' }, 401);
+      return c.json({ success: false, error: 'Email hoặc mật khẩu không chính xác' }, 401);
     }
 
     const payload = {
@@ -161,45 +246,59 @@ app.post('/api/login', async (c) => {
 app.post('/api/register', async (c) => {
   try {
     await ensureUsersTableAndSeeds(c.env.DB);
-    const { username, password, full_name } = await c.req.json();
-    const cleanUser = (username || '').trim().toLowerCase();
+    const { email, otp, password, full_name } = await c.req.json();
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanOtp = (otp || '').trim();
     const cleanPw = (password || '').trim();
     const cleanName = (full_name || '').trim();
 
-    if (!cleanUser || !cleanPw) {
-      return c.json({ success: false, error: 'Tên đăng nhập và mật khẩu không được để trống' }, 400);
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      return c.json({ success: false, error: 'Vui lòng nhập địa chỉ Email hợp lệ' }, 400);
     }
 
-    if (cleanUser.length < 3) {
-      return c.json({ success: false, error: 'Tên đăng nhập phải có ít nhất 3 ký tự' }, 400);
+    if (!cleanOtp) {
+      return c.json({ success: false, error: 'Vui lòng nhập mã xác thực OTP đã gửi về email' }, 400);
     }
 
-    if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUser)) {
-      return c.json({ success: false, error: 'Tên đăng nhập chỉ chứa chữ cái, số, dấu gạch dưới hoặc chấm' }, 400);
-    }
-
-    if (cleanPw.length < 6) {
+    if (!cleanPw || cleanPw.length < 6) {
       return c.json({ success: false, error: 'Mật khẩu phải có độ dài từ 6 ký tự trở lên' }, 400);
     }
 
-    const existing = await c.env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(cleanUser).first();
-    if (existing) {
-      return c.json({ success: false, error: 'Tên đăng nhập này đã được đăng ký' }, 400);
+    // Kiểm tra OTP trong bảng email_verifications
+    const record = await c.env.DB.prepare('SELECT * FROM email_verifications WHERE email = ?').bind(cleanEmail).first();
+    if (!record) {
+      return c.json({ success: false, error: 'Chưa có mã OTP nào được gửi cho email này. Vui lòng bấm "Gửi mã OTP"!' }, 400);
     }
 
-    // Luôn luôn tạo với quyền guest (chỉ tài khoản phupx1 được cấp admin)
+    if (Date.now() > record.expires_at) {
+      return c.json({ success: false, error: 'Mã OTP đã hết hạn (5 phút). Vui lòng yêu cầu gửi mã mới!' }, 400);
+    }
+
+    if (record.otp_code !== cleanOtp) {
+      return c.json({ success: false, error: 'Mã xác thực OTP không chính xác' }, 400);
+    }
+
+    const existing = await c.env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(cleanEmail).first();
+    if (existing) {
+      return c.json({ success: false, error: 'Email này đã được đăng ký tài khoản' }, 400);
+    }
+
+    // Luôn luôn tạo với quyền guest
     const role = 'guest';
     const passwordHash = await hashPassword(cleanPw);
 
     const info = await c.env.DB.prepare(
       'INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, ?, ?)'
-    ).bind(cleanUser, passwordHash, role, cleanName || cleanUser).run();
+    ).bind(cleanEmail, passwordHash, role, cleanName || cleanEmail).run();
+
+    // Xóa record verification sau khi đăng ký thành công
+    await c.env.DB.prepare('DELETE FROM email_verifications WHERE email = ?').bind(cleanEmail).run();
 
     const payload = {
       id: info.meta.last_row_id,
-      username: cleanUser,
+      username: cleanEmail,
       role: role,
-      full_name: cleanName || cleanUser,
+      full_name: cleanName || cleanEmail,
       timestamp: Date.now(),
     };
 
@@ -277,6 +376,7 @@ app.use('/api/*', async (c, next) => {
   if (
     path === '/api/login' ||
     path === '/api/register' ||
+    path === '/api/send-otp' ||
     path === '/api/logout' ||
     (path.startsWith('/api/payment-accounts/') && path.endsWith('/qr'))
   ) {
@@ -297,24 +397,24 @@ app.use('/api/*', async (c, next) => {
 
   // 3. Phân quyền RBAC (Role-Based Access Control):
   // Admin được làm mọi thứ.
-  // Guest chỉ được:
+  // Guest được:
   // - POST /api/scan
   // - POST /api/notify
   // - GET /api/members (chỉ đọc)
-  // - GET /api/payment-accounts (chỉ đọc)
+  // - Toàn quyền cấu hình tài khoản thanh toán cá nhân (GET, POST, PUT default, DELETE /api/payment-accounts*)
   // - GET /api/me
   if (sessionUser.role !== 'admin') {
     const isGuestAllowed =
       (path === '/api/scan' && method === 'POST') ||
       (path === '/api/notify' && method === 'POST') ||
       (path === '/api/members' && method === 'GET') ||
-      (path === '/api/payment-accounts' && method === 'GET') ||
+      path.startsWith('/api/payment-accounts') ||
       (path === '/api/me' && method === 'GET');
 
     if (!isGuestAllowed) {
       return c.json({
         success: false,
-        error: 'Forbidden: Bạn chỉ có quyền Guest. Không được phép chỉnh sửa danh bạ, tài khoản ngân hàng hoặc cài đặt hệ thống!',
+        error: 'Forbidden: Bạn chỉ có quyền Guest. Không được phép chỉnh sửa danh bạ hoặc cài đặt hệ thống!',
       }, 403);
     }
   }
@@ -757,17 +857,17 @@ function renderLoginPage() {
     <!-- FORM 1: LOGIN -->
     <form id="form-login" onsubmit="handleLogin(event)" class="space-y-4">
       <div class="space-y-1.5">
-        <label for="login-username" class="block text-xs font-semibold text-slate-700">Tên đăng nhập</label>
+        <label for="login-email" class="block text-xs font-semibold text-slate-700">Email của bạn</label>
         <div class="relative">
-          <input type="text" id="login-username" required autofocus placeholder="Ví dụ: phupx1 hoặc haivnt1" class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all lowercase">
-          <i data-lucide="user" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
+          <input type="text" id="login-email" required autofocus placeholder="Ví dụ: oceanvo437@gmail.com" class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all lowercase">
+          <i data-lucide="mail" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
         </div>
       </div>
 
       <div class="space-y-1.5">
         <label for="login-password" class="block text-xs font-semibold text-slate-700">Mật khẩu</label>
         <div class="relative">
-          <input type="password" id="login-password" required placeholder="Nhập mật khẩu của bạn..." class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 pr-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
+          <input type="password" id="login-password" required placeholder="Nhập mật khẩu..." class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 pr-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
           <i data-lucide="lock" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
           <button type="button" onclick="togglePasswordVisibility('login-password', 'login-eye-icon')" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer">
             <i id="login-eye-icon" data-lucide="eye" class="w-4 h-4"></i>
@@ -783,26 +883,41 @@ function renderLoginPage() {
       <div class="p-3 bg-amber-50/70 rounded-xl border border-amber-200/60 text-[11px] text-amber-800 space-y-1">
         <p class="font-semibold flex items-center space-x-1">
           <i data-lucide="info" class="w-3.5 h-3.5 text-amber-600"></i>
-          <span>Tài khoản Demo dành cho Guest:</span>
+          <span>Tài khoản Guest mặc định:</span>
         </p>
-        <p>Tên đăng nhập: <code class="bg-amber-100/80 px-1 py-0.5 rounded font-mono font-bold">haivnt1</code> — Pass: <code class="bg-amber-100/80 px-1 py-0.5 rounded font-mono font-bold">123456</code></p>
+        <p>Email: <code class="bg-amber-100/80 px-1 py-0.5 rounded font-mono font-bold">oceanvo437@gmail.com</code> — Mật khẩu: <code class="bg-amber-100/80 px-1 py-0.5 rounded font-mono font-bold">haivnt</code></p>
       </div>
     </form>
 
     <!-- FORM 2: REGISTER -->
     <form id="form-register" onsubmit="handleRegister(event)" class="hidden space-y-4">
       <div class="space-y-1.5">
-        <label for="reg-username" class="block text-xs font-semibold text-slate-700">Tên đăng nhập mới (viết liền không dấu)</label>
+        <label for="reg-email" class="block text-xs font-semibold text-slate-700">Địa chỉ Email</label>
+        <div class="flex gap-2">
+          <div class="relative flex-1">
+            <input type="email" id="reg-email" required placeholder="name@company.com" class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all lowercase">
+            <i data-lucide="mail" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
+          </div>
+          <button type="button" id="btn-send-otp" onclick="handleSendOtp()" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl transition-all flex items-center space-x-1 cursor-pointer shrink-0 shadow-sm">
+            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            <span>Gửi OTP</span>
+          </button>
+        </div>
+        <p id="otp-timer-msg" class="text-[11px] text-slate-400 hidden"></p>
+      </div>
+
+      <div class="space-y-1.5">
+        <label for="reg-otp" class="block text-xs font-semibold text-slate-700">Mã xác thực OTP (6 số)</label>
         <div class="relative">
-          <input type="text" id="reg-username" required placeholder="Ví dụ: namnv2, linhnt..." class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all lowercase">
-          <i data-lucide="at-sign" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
+          <input type="text" id="reg-otp" required maxlength="6" placeholder="Ví dụ: 123456" class="w-full text-sm font-mono tracking-widest border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
+          <i data-lucide="shield-check" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
         </div>
       </div>
 
       <div class="space-y-1.5">
         <label for="reg-fullname" class="block text-xs font-semibold text-slate-700">Họ và tên của bạn</label>
         <div class="relative">
-          <input type="text" id="reg-fullname" required placeholder="Ví dụ: Nguyễn Văn Nam" class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
+          <input type="text" id="reg-fullname" required placeholder="Ví dụ: Võ Nguyễn Trung Hải" class="w-full text-sm border border-slate-200 rounded-xl px-4 py-3 pl-10 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all">
           <i data-lucide="user" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none"></i>
         </div>
       </div>
@@ -828,11 +943,11 @@ function renderLoginPage() {
 
       <button type="submit" id="btn-register" class="w-full bg-slate-900 hover:bg-black text-white font-semibold py-3 rounded-xl text-sm shadow-md transition-all flex items-center justify-center space-x-2 cursor-pointer">
         <i data-lucide="user-plus" class="w-4 h-4"></i>
-        <span>Đăng Ký Tài Khoản</span>
+        <span>Xác Nhận & Đăng Ký</span>
       </button>
 
       <p class="text-[11px] text-slate-400 text-center leading-relaxed">
-        Tài khoản mới đăng ký sẽ thuộc quyền <b>Guest</b> (được phép scan bill, chia tiền và gửi email).
+        Tài khoản Guest được phép cấu hình tài khoản thanh toán riêng, scan bill và chia tiền.
       </p>
     </form>
 
@@ -859,13 +974,13 @@ function renderLoginPage() {
         tabReg.classList.remove('active');
         formLogin.classList.remove('hidden');
         formReg.classList.add('hidden');
-        document.getElementById('login-username').focus();
+        document.getElementById('login-email').focus();
       } else {
         tabReg.classList.add('active');
         tabLogin.classList.remove('active');
         formReg.classList.remove('hidden');
         formLogin.classList.add('hidden');
-        document.getElementById('reg-username').focus();
+        document.getElementById('reg-email').focus();
       }
       lucide.createIcons();
     }
@@ -898,10 +1013,73 @@ function renderLoginPage() {
       lucide.createIcons();
     }
 
+    let otpCooldown = 0;
+    let otpTimerInterval = null;
+
+    async function handleSendOtp() {
+      clearAlert();
+      const emailInput = document.getElementById('reg-email');
+      const cleanEmail = emailInput.value.trim().toLowerCase();
+      const btn = document.getElementById('btn-send-otp');
+      const msgTimer = document.getElementById('otp-timer-msg');
+
+      if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+        showAlert('Vui lòng nhập địa chỉ email hợp lệ trước khi gửi mã OTP!');
+        emailInput.focus();
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span>Đang gửi...</span>';
+      lucide.createIcons();
+
+      try {
+        const res = await fetch('/api/send-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert(data.message, true);
+          document.getElementById('reg-otp').focus();
+
+          // Khởi động bộ đếm 60 giây gửi lại
+          otpCooldown = 60;
+          msgTimer.classList.remove('hidden');
+          msgTimer.textContent = 'Mã đã gửi! Bạn có thể gửi lại sau 60s.';
+          clearInterval(otpTimerInterval);
+          otpTimerInterval = setInterval(() => {
+            otpCooldown--;
+            if (otpCooldown <= 0) {
+              clearInterval(otpTimerInterval);
+              btn.disabled = false;
+              btn.innerHTML = '<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Gửi OTP</span>';
+              msgTimer.classList.add('hidden');
+              lucide.createIcons();
+            } else {
+              btn.innerHTML = '<span>' + otpCooldown + 's</span>';
+              msgTimer.textContent = 'Bạn có thể gửi lại mã sau ' + otpCooldown + 's.';
+            }
+          }, 1000);
+        } else {
+          showAlert(data.error || 'Không thể gửi mã OTP');
+          btn.disabled = false;
+          btn.innerHTML = '<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Gửi OTP</span>';
+          lucide.createIcons();
+        }
+      } catch (err) {
+        showAlert('Lỗi gửi OTP: ' + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="send" class="w-3.5 h-3.5"></i><span>Gửi OTP</span>';
+        lucide.createIcons();
+      }
+    }
+
     async function handleLogin(e) {
       e.preventDefault();
       clearAlert();
-      const uInput = document.getElementById('login-username');
+      const emailInput = document.getElementById('login-email');
       const pwInput = document.getElementById('login-password');
       const btn = document.getElementById('btn-login');
 
@@ -914,7 +1092,7 @@ function renderLoginPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: uInput.value.trim(),
+            email: emailInput.value.trim(),
             password: pwInput.value.trim(),
           }),
         });
@@ -922,7 +1100,7 @@ function renderLoginPage() {
         if (data.success) {
           window.location.reload();
         } else {
-          showAlert(data.error || 'Tên đăng nhập hoặc mật khẩu không đúng!');
+          showAlert(data.error || 'Email hoặc mật khẩu không chính xác!');
           pwInput.focus();
           pwInput.select();
         }
@@ -938,7 +1116,8 @@ function renderLoginPage() {
     async function handleRegister(e) {
       e.preventDefault();
       clearAlert();
-      const uInput = document.getElementById('reg-username');
+      const emailInput = document.getElementById('reg-email');
+      const otpInput = document.getElementById('reg-otp');
       const nameInput = document.getElementById('reg-fullname');
       const pwInput = document.getElementById('reg-password');
       const cfInput = document.getElementById('reg-password-confirm');
@@ -951,7 +1130,7 @@ function renderLoginPage() {
       }
 
       btn.disabled = true;
-      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Đang tạo tài khoản...</span>';
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Đang xác nhận...</span>';
       lucide.createIcons();
 
       try {
@@ -959,7 +1138,8 @@ function renderLoginPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: uInput.value.trim(),
+            email: emailInput.value.trim(),
+            otp: otpInput.value.trim(),
             full_name: nameInput.value.trim(),
             password: pwInput.value.trim(),
           }),
@@ -977,7 +1157,7 @@ function renderLoginPage() {
         showAlert('Lỗi kết nối máy chủ: ' + err.message);
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<i data-lucide="user-plus" class="w-4 h-4"></i><span>Đăng Ký Tài Khoản</span>';
+        btn.innerHTML = '<i data-lucide="user-plus" class="w-4 h-4"></i><span>Xác Nhận & Đăng Ký</span>';
         lucide.createIcons();
       }
     }
@@ -1075,11 +1255,11 @@ app.get('*', async (c) => {
             <i data-lucide="users" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
             <span>Accounts</span>
           </button>
+          ` : ''}
           <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn px-2 sm:px-3.5 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all flex items-center justify-center space-x-1 sm:space-x-1.5 cursor-pointer flex-1 sm:flex-initial">
             <i data-lucide="settings" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
             <span>Settings</span>
           </button>
-          ` : ''}
         </nav>
 
         <!-- Logout button on desktop -->
@@ -1449,6 +1629,7 @@ app.get('*', async (c) => {
         </div>
       </div>
 
+      ${isAdmin ? `
       <!-- Google Apps Script Config -->
       <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-4">
         <div>
@@ -1523,7 +1704,7 @@ app.get('*', async (c) => {
           <table class="w-full text-left text-sm">
             <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
               <tr>
-                <th class="p-3">Tên đăng nhập</th>
+                <th class="p-3">Tên đăng nhập / Email</th>
                 <th class="p-3">Họ tên hiển thị</th>
                 <th class="p-3 text-center">Vai trò</th>
                 <th class="p-3 text-slate-400">Ngày tạo</th>
@@ -1538,6 +1719,7 @@ app.get('*', async (c) => {
           </table>
         </div>
       </div>
+      ` : ''}
 
     </div>
 
@@ -1641,8 +1823,8 @@ app.get('*', async (c) => {
       if (tabId === 'members') loadMembers();
       if (tabId === 'settings') {
         loadPaymentAccounts();
-        loadSettings();
-        loadUsersList();
+        if (document.getElementById('setting-gas-url')) loadSettings();
+        if (document.getElementById('users-list-tbody')) loadUsersList();
       }
     }
 

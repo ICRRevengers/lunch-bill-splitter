@@ -28,6 +28,45 @@ function doPost(e) {
     }
 
     var data = JSON.parse(e.postData.contents);
+
+    // XỬ LÝ GỬI MÃ OTP XÁC THỰC EMAIL
+    if (data.action === "send_otp") {
+      var targetEmail = (data.email || "").trim();
+      var otpCode = data.otp;
+      var appName = data.sender_name || "Cơm Trưa Đồng Nghiệp";
+
+      if (!targetEmail || !otpCode) {
+        return jsonResponse({ success: false, error: "Thiếu email hoặc mã OTP" }, 400);
+      }
+
+      var otpSubject = "Mã xác thực đăng ký tài khoản Cơm Trưa: " + otpCode;
+      var otpPlainText = "Xin chào,\n\nMã xác thực (OTP) để tạo tài khoản Cơm Trưa của bạn là: " + otpCode + "\nMã có hiệu lực trong vòng 5 phút. Vui lòng không chia sẻ mã này cho người khác.\n\nTrân trọng!";
+      var otpHtml = '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">' +
+        '<div style="background: #ea580c; padding: 24px 20px; text-align: center; color: #ffffff;">' +
+        '  <h2 style="margin: 0; font-size: 20px; font-weight: bold;">Xác Thực Email Đăng Ký</h2>' +
+        '  <p style="margin: 6px 0 0; opacity: 0.9; font-size: 13px;">Hệ thống chia tiền cơm trưa văn phòng</p>' +
+        '</div>' +
+        '<div style="padding: 24px 20px; text-align: center; color: #334155;">' +
+        '  <p style="font-size: 14px; margin-top: 0;">Xin chào <b>' + targetEmail + '</b>,</p>' +
+        '  <p style="font-size: 14px; color: #64748b; line-height: 1.5;">Bạn đang thực hiện đăng ký tài khoản trên hệ thống. Dưới đây là mã xác thực OTP của bạn:</p>' +
+        '  <div style="margin: 24px auto; display: inline-block; background: #fff7ed; border: 2px dashed #ea580c; padding: 12px 32px; border-radius: 12px;">' +
+        '    <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #ea580c; font-family: monospace;">' + otpCode + '</span>' +
+        '  </div>' +
+        '  <p style="font-size: 12px; color: #94a3b8; margin: 0;">Mã có hiệu lực trong <b>5 phút</b>. Vui lòng không chia sẻ mã này cho bất kỳ ai.</p>' +
+        '</div>' +
+        '</div>';
+
+      GmailApp.sendEmail(targetEmail, otpSubject, otpPlainText, {
+        htmlBody: otpHtml,
+        name: appName
+      });
+
+      return jsonResponse({
+        success: true,
+        message: "Đã gửi mã OTP đến " + targetEmail
+      });
+    }
+
     var storeName = data.store_name || "Bữa trưa văn phòng";
     var dateStr = data.date || Utilities.formatDate(new Date(), "GMT+7", "dd/MM/yyyy");
     var adminEmail = data.admin_email || "";
