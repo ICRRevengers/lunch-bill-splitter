@@ -159,7 +159,7 @@ app.post('/api/send-otp', async (c) => {
     }
 
     const senderSetting = await c.env.DB.prepare("SELECT value FROM app_settings WHERE key = 'sender_name'").first();
-    const senderName = senderSetting && senderSetting.value ? senderSetting.value : 'Cơm Trưa Đồng Nghiệp';
+    const senderName = senderSetting && senderSetting.value ? senderSetting.value : 'Bill Splitter';
 
     // Tạo mã OTP ngẫu nhiên 6 chữ số
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -739,7 +739,7 @@ app.post('/api/scan', async (c) => {
     if (!scannerData.success) {
       return c.json({
         success: false,
-        error: scannerData.error || 'Không bóc tách được hóa đơn',
+        error: scannerData.error || 'Không bóc tách được ảnh đơn',
         raw_output: scannerData.raw_output,
       }, 500);
     }
@@ -794,7 +794,7 @@ app.post('/api/notify', async (c) => {
     }
 
     payload.admin_email = adminEmail || '';
-    payload.sender_name = senderName || 'Cơm Trưa Đồng Nghiệp';
+    payload.sender_name = senderName || 'Bill Splitter';
 
     const gasRes = await fetch(gasUrl, {
       method: 'POST',
@@ -854,7 +854,7 @@ function renderLoginPage() {
         <i data-lucide="receipt" class="w-7 h-7"></i>
       </div>
       <h1 class="text-2xl font-bold text-slate-900">Bill Splitter</h1>
-      <p class="text-xs text-slate-500">Hệ thống bóc tách hóa đơn & chia tiền ăn trưa nội bộ</p>
+      <p class="text-xs text-slate-500">Hệ thống bóc tách & phân chia chi phí nhóm tự động</p>
     </div>
 
     <!-- Auth Tabs Switcher -->
@@ -968,7 +968,7 @@ function renderLoginPage() {
       </button>
 
       <p class="text-[11px] text-slate-400 text-center leading-relaxed">
-        Tài khoản Guest được phép cấu hình tài khoản thanh toán riêng, scan bill và chia tiền.
+        Tài khoản Guest được phép cấu hình tài khoản thanh toán riêng, scan và phân chia chi phí.
       </p>
     </form>
 
@@ -1204,7 +1204,7 @@ app.get('*', async (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bill Splitter — Quản Lý & Chia Tiền Cơm Trưa</title>
+  <title>Bill Splitter — Phân Chia Chi Phí Nhóm</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script>
@@ -1296,7 +1296,7 @@ app.get('*', async (c) => {
   <main class="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 space-y-6">
 
     <!-- ========================================================================= -->
-    <!-- TAB 1: CHIA TIỀN (SPLITTER) -->
+    <!-- TAB 1: PHÂN CHIA (SPLITTER) -->
     <!-- ========================================================================= -->
     <div id="tab-splitter" class="space-y-6">
 
@@ -1306,13 +1306,13 @@ app.get('*', async (c) => {
           <div>
             <h2 class="text-base font-semibold text-slate-900 flex items-center space-x-2">
               <span class="flex items-center justify-center w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold">1</span>
-              <span>Tải Hóa Đơn ShopeeFood / GrabFood</span>
+              <span>Tải Ảnh Đơn / Bill</span>
             </h2>
-            <p class="text-xs text-slate-500 mt-0.5">Hỗ trợ tải 1 hoặc nhiều ảnh chụp nối tiếp nếu hóa đơn dài. Dán trực tiếp (Ctrl + V) hoặc bấm nút.</p>
+            <p class="text-xs text-slate-500 mt-0.5">Hỗ trợ tải 1 hoặc nhiều ảnh chụp nối tiếp nếu đơn dài. Dán trực tiếp (Ctrl + V) hoặc bấm nút.</p>
           </div>
           <button type="button" onclick="document.getElementById('file-input').click()" class="self-start sm:self-auto bg-brand-50 hover:bg-brand-100 text-brand-700 font-semibold px-4 py-2 rounded-xl text-sm border border-brand-200 transition-all flex items-center space-x-2 cursor-pointer shadow-sm">
             <i data-lucide="upload" class="w-4 h-4"></i>
-            <span>Chọn ảnh hóa đơn</span>
+            <span>Chọn ảnh</span>
           </button>
         </div>
 
@@ -1327,7 +1327,7 @@ app.get('*', async (c) => {
             <div class="text-sm text-slate-600">
               <span class="font-semibold text-brand-600 hover:underline">Bấm để chọn 1 hoặc nhiều ảnh</span> hoặc kéo ảnh vào đây
             </div>
-            <p class="text-xs text-slate-400">Hỗ trợ PNG, JPG, JPEG, WebP (Có thể chọn nhiều ảnh liên tiếp nếu hóa đơn dài)</p>
+            <p class="text-xs text-slate-400">Hỗ trợ PNG, JPG, JPEG, WebP (Có thể chọn nhiều ảnh liên tiếp nếu đơn dài)</p>
           </div>
         </div>
 
@@ -1353,7 +1353,7 @@ app.get('*', async (c) => {
           <div class="flex flex-wrap items-center justify-center gap-3 pt-3">
             <button type="button" onclick="triggerScan()" id="btn-scan" class="bg-brand-600 hover:bg-brand-700 text-white font-medium px-6 py-2.5 rounded-xl text-sm shadow-md shadow-brand-600/20 transition-all flex items-center space-x-2 cursor-pointer">
               <i data-lucide="sparkles" class="w-4 h-4"></i>
-              <span>Bóc Tách Hóa Đơn Bằng AI</span>
+              <span>Bóc Tách Bằng AI</span>
             </button>
             <button type="button" onclick="resetAllImages()" class="text-slate-500 hover:text-red-600 text-sm px-4 py-2.5 rounded-xl border border-slate-200 hover:border-red-200 hover:bg-red-50 transition-colors flex items-center space-x-1.5 cursor-pointer">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -1381,15 +1381,15 @@ app.get('*', async (c) => {
 
           <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <label class="block text-xs font-medium text-slate-500 mb-1">Tên Quán Ăn</label>
-              <input type="text" id="input-store-name" class="w-full text-sm font-semibold border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
+              <label class="block text-xs font-medium text-slate-500 mb-1">Địa điểm / Cửa hàng</label>
+              <input type="text" id="input-store-name" placeholder="Ví dụ: Siêu thị, Coffee, Cửa hàng..." class="w-full text-sm font-semibold border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-500 mb-1">Tổng Tiền Gốc Các Món</label>
+              <label class="block text-xs font-medium text-slate-500 mb-1">Tổng Chi Phí Gốc</label>
               <input type="text" id="input-subtotal" oninput="this.value = formatInput(this.value); recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-500 mb-1">Voucher Giảm Món</label>
+              <label class="block text-xs font-medium text-slate-500 mb-1">Voucher / Ưu Đãi Giảm</label>
               <input type="text" id="input-discount-items" oninput="this.value = formatInput(this.value); recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-emerald-600 font-medium focus:outline-none focus:border-brand-500">
             </div>
             <div>
@@ -1404,7 +1404,7 @@ app.get('*', async (c) => {
               <input type="text" id="input-service-fee" oninput="this.value = formatInput(this.value); recalculate()" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-500 mb-1">Tổng Bill Thực Trả (App)</label>
+              <label class="block text-xs font-medium text-slate-500 mb-1">Tổng Thực Trả</label>
               <input type="text" id="input-final-total" oninput="this.value = formatInput(this.value); recalculate()" class="w-full text-sm font-bold text-brand-600 border border-brand-300 bg-brand-50/30 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
             </div>
             <div>
@@ -1421,11 +1421,11 @@ app.get('*', async (c) => {
           <div class="flex items-center justify-between border-b border-slate-100 pb-3">
             <div class="flex items-center space-x-2">
               <span class="flex items-center justify-center w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold">3</span>
-              <h2 class="text-base font-semibold text-slate-900">Chi tiết món ăn và giá tiền cụ thể</h2>
+              <h2 class="text-base font-semibold text-slate-900">Chi tiết từng mục & chi phí</h2>
             </div>
             <button type="button" onclick="addNewDishRow()" class="text-brand-600 hover:text-brand-700 text-xs font-medium flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand-50 cursor-pointer">
               <i data-lucide="plus" class="w-3.5 h-3.5"></i>
-              <span>Thêm món</span>
+              <span>Thêm mục</span>
             </button>
           </div>
 
@@ -1435,9 +1435,9 @@ app.get('*', async (c) => {
                 <tr>
                   <th class="p-3">Người đặt</th>
                   <th class="p-3">Email nhận thông báo</th>
-                  <th class="p-3">Tên món ăn</th>
+                  <th class="p-3">Mục / Dịch vụ</th>
                   <th class="p-3 w-16 text-center">SL</th>
-                  <th class="p-3 text-right">Giá gốc (VNĐ)</th>
+                  <th class="p-3 text-right">Giá gốc</th>
                   <th class="p-3 w-12 text-center">Xóa</th>
                 </tr>
               </thead>
@@ -1448,12 +1448,12 @@ app.get('*', async (c) => {
           </div>
         </div>
 
-        <!-- Calculated Settlements (Bảng chia tiền cuối cùng) -->
+        <!-- Calculated Settlements (Bảng phân chia cuối cùng) -->
         <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-4">
           <div class="flex items-center justify-between border-b border-slate-100 pb-3">
             <div class="flex items-center space-x-2">
               <span class="flex items-center justify-center w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold">4</span>
-              <h2 class="text-base font-semibold text-slate-900">Bảng Quyết Toán & Chia Tiền Theo Đầu Người</h2>
+              <h2 class="text-base font-semibold text-slate-900">Bảng Phân Chia Theo Thành Viên</h2>
             </div>
             <span id="settlement-total-badge" class="text-xs font-bold px-3 py-1 rounded-full bg-brand-100 text-brand-700"></span>
           </div>
@@ -1463,8 +1463,8 @@ app.get('*', async (c) => {
               <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th class="p-3">Thành viên</th>
-                  <th class="p-3">Món</th>
-                  <th class="p-3 text-right">Tiền món gốc</th>
+                  <th class="p-3">Mục</th>
+                  <th class="p-3 text-right">Chi phí gốc</th>
                   <th class="p-3 text-right text-emerald-600">Được giảm</th>
                   <th class="p-3 text-right text-sky-600">Ship chia đều</th>
                   <th class="p-3 text-right font-bold text-brand-600">CẦN TRẢ</th>
@@ -1500,7 +1500,7 @@ app.get('*', async (c) => {
       <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-5">
         <div>
           <h2 class="text-base font-semibold text-slate-900">Các thành viên và tài khoản</h2>
-          <p class="text-xs text-slate-500 mt-1">Dưới đây là danh sách các thành viên của ODC và email của họ. Thu thập email để gửi Spilt Bill gửi hóa đơn ăn uống tới tận giường.</p>
+          <p class="text-xs text-slate-500 mt-1">Danh sách thành viên và email nhận thông báo chi tiết từng đợt phân chia.</p>
         </div>
 
         <!-- Add Form -->
@@ -1527,7 +1527,7 @@ app.get('*', async (c) => {
             <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
               <tr>
                 <th class="p-3">Tên thành viên</th>
-                <th class="p-3">Email nhận hóa đơn</th>
+                <th class="p-3">Email nhận thông báo</th>
                 <th class="p-3 w-20 text-center">Thao tác</th>
               </tr>
             </thead>
@@ -1665,8 +1665,8 @@ app.get('*', async (c) => {
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-500 mb-1">Tên Người Gửi Hiển Thị (Tránh vào Spam)</label>
-            <input type="text" id="setting-sender-name" placeholder="Ví dụ: Alviss - Cơm Trưa" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
-            <p class="text-[11px] text-slate-400 mt-1">Nên đặt kèm tên của bạn (ví dụ: Alviss - Cơm Trưa) để bạn bè nhận diện ngay và không bị bộ lọc Gmail đánh giá là thư rác mạo danh.</p>
+            <input type="text" id="setting-sender-name" placeholder="Ví dụ: Alviss - Bill Splitter" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500">
+            <p class="text-[11px] text-slate-400 mt-1">Nên đặt kèm tên của bạn (ví dụ: Alviss - Bill Splitter) để bạn bè nhận diện ngay và không bị bộ lọc Gmail đánh giá là thư rác mạo danh.</p>
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-500 mb-1">Email của Alviss (Nhận bảng tổng hợp đơn)</label>
@@ -1774,13 +1774,13 @@ app.get('*', async (c) => {
   <div id="lightbox-modal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target === this) closeLightbox()">
     <div class="relative max-w-4xl w-full max-h-[92vh] flex flex-col items-center">
       <div class="w-full flex justify-between items-center text-white pb-2 px-1">
-        <span id="lightbox-title" class="text-sm font-semibold">Ảnh hóa đơn</span>
+        <span id="lightbox-title" class="text-sm font-semibold">Ảnh đơn</span>
         <button type="button" onclick="closeLightbox()" class="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer">
           <i data-lucide="x" class="w-6 h-6"></i>
         </button>
       </div>
       <div class="overflow-auto max-h-[82vh] w-full flex items-center justify-center bg-slate-900/50 rounded-2xl p-2 border border-white/10">
-        <img id="lightbox-img" src="" alt="Hóa đơn phóng to" class="max-h-[80vh] max-w-full object-contain rounded-lg shadow-2xl">
+        <img id="lightbox-img" src="" alt="Ảnh phóng to" class="max-h-[80vh] max-w-full object-contain rounded-lg shadow-2xl">
       </div>
     </div>
   </div>
@@ -1942,7 +1942,7 @@ app.get('*', async (c) => {
           const compressedB64 = await compressImageToWebP(file);
           uploadedImages.push({
             id: Date.now() + Math.random().toString(36).substring(2, 6),
-            name: file.name || 'Ảnh hóa đơn',
+            name: file.name || 'Ảnh đơn',
             base64: compressedB64,
           });
         } catch (err) {
@@ -1996,7 +1996,7 @@ app.get('*', async (c) => {
 
     function openLightbox(idx) {
       if (!uploadedImages[idx]) return;
-      document.getElementById('lightbox-title').textContent = 'Ảnh hóa đơn - Phần ' + (idx + 1) + ' / ' + uploadedImages.length;
+      document.getElementById('lightbox-title').textContent = 'Ảnh đơn - Phần ' + (idx + 1) + ' / ' + uploadedImages.length;
       document.getElementById('lightbox-img').src = uploadedImages[idx].base64;
       document.getElementById('lightbox-modal').classList.remove('hidden');
       lucide.createIcons();
@@ -2024,7 +2024,7 @@ app.get('*', async (c) => {
     // Scan Bill via AI (Gửi mảng nhiều ảnh)
     async function triggerScan() {
       if (!uploadedImages.length) {
-        alert('Vui lòng chọn ít nhất 1 ảnh hóa đơn!');
+        alert('Vui lòng chọn ít nhất 1 ảnh!');
         return;
       }
       const btn = document.getElementById('btn-scan');
@@ -2040,7 +2040,7 @@ app.get('*', async (c) => {
         });
         const data = await res.json();
         if (!data.success) {
-          alert('Lỗi bóc tách hóa đơn: ' + data.error);
+          alert('Lỗi bóc tách: ' + data.error);
           return;
         }
 
@@ -2057,7 +2057,7 @@ app.get('*', async (c) => {
         scannedDishes = (bill.items || []).map(item => ({
           user_name: item.matched_user_name || item.raw_user_name || 'Khách',
           email: item.email || '',
-          dish_name: item.dish_name || 'Món ăn',
+          dish_name: item.dish_name || 'Mục',
           quantity: item.quantity || 1,
           price: item.price || 0,
         }));
@@ -2072,7 +2072,7 @@ app.get('*', async (c) => {
         alert('Lỗi kết nối máy chủ: ' + err.message);
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i><span>Bóc Tách Hóa Đơn Bằng AI</span>';
+        btn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i><span>Bóc Tách Bằng AI</span>';
         lucide.createIcons();
       }
     }
@@ -2126,7 +2126,7 @@ app.get('*', async (c) => {
       scannedDishes.push({
         user_name: 'Người mới',
         email: '',
-        dish_name: 'Món thêm',
+        dish_name: 'Mục thêm',
         quantity: 1,
         price: 40000,
       });
@@ -2134,7 +2134,7 @@ app.get('*', async (c) => {
       recalculate();
     }
 
-    // Calculation Algorithm (Thuật toán chia tiền)
+    // Calculation Algorithm (Thuật toán phân chia)
     function recalculate() {
       const subtotal = parseNumber(document.getElementById('input-subtotal').value);
       const discountItems = parseNumber(document.getElementById('input-discount-items').value);
@@ -2193,7 +2193,7 @@ app.get('*', async (c) => {
         } else {
           // Sinh mã VietQR động có sẵn số tiền cho tài khoản ngân hàng
           if (bankAcc.account_no) {
-            qrCodeUrl = \`https://img.vietqr.io/image/\${bankAcc.bank_code}-\${bankAcc.account_no}-compact2.png?amount=\${roundedPay}&addInfo=\${encodeURIComponent('AN TRUA ' + u.name)}&accountName=\${encodeURIComponent(bankAcc.account_holder || '')}\`;
+            qrCodeUrl = \`https://img.vietqr.io/image/\${bankAcc.bank_code}-\${bankAcc.account_no}-compact2.png?amount=\${roundedPay}&addInfo=\${encodeURIComponent('SPLIT ' + u.name)}&accountName=\${encodeURIComponent(bankAcc.account_holder || '')}\`;
           }
         }
 
@@ -2218,7 +2218,7 @@ app.get('*', async (c) => {
         if (diff !== 0 && Math.abs(diff) < 10000) {
           currentSettlements[0].finalAmount += diff;
           if (!isMomo && currentSettlements[0].vietqrUrl && bankAcc.account_no) {
-            currentSettlements[0].vietqrUrl = \`https://img.vietqr.io/image/\${bankAcc.bank_code}-\${bankAcc.account_no}-compact2.png?amount=\${currentSettlements[0].finalAmount}&addInfo=\${encodeURIComponent('AN TRUA ' + currentSettlements[0].name)}&accountName=\${encodeURIComponent(bankAcc.account_holder || '')}\`;
+            currentSettlements[0].vietqrUrl = \`https://img.vietqr.io/image/\${bankAcc.bank_code}-\${bankAcc.account_no}-compact2.png?amount=\${currentSettlements[0].finalAmount}&addInfo=\${encodeURIComponent('SPLIT ' + currentSettlements[0].name)}&accountName=\${encodeURIComponent(bankAcc.account_holder || '')}\`;
           }
         }
       }
@@ -2303,12 +2303,12 @@ app.get('*', async (c) => {
               <span class="font-bold text-[#be185d] font-mono text-sm">\${s.bankInfo.account_no || ''}</span>
             </div>
             <div class="flex justify-between items-center py-0.5 border-b border-pink-100">
-              <span class="text-slate-500">Số tiền cần chuyển:</span>
+              <span class="text-slate-500">Cần chuyển:</span>
               <span class="font-bold text-[#be185d] text-base">\${formatVND(s.finalAmount)}</span>
             </div>
             <div class="flex justify-between items-center py-0.5">
               <span class="text-slate-500">Lời nhắn:</span>
-              <span class="font-bold text-slate-800">AN TRUA \${s.name}</span>
+              <span class="font-bold text-slate-800">SPLIT \${s.name}</span>
             </div>
           </div>
         \`;
@@ -2319,9 +2319,9 @@ app.get('*', async (c) => {
             <span>Mở Ứng Dụng MoMo Để Chuyển</span>
           </button>
           <div class="grid grid-cols-2 gap-2 pt-1">
-            <button type="button" onclick="copyToClipboard('\${s.finalAmount}', 'Đã copy số tiền \${formatVND(s.finalAmount)}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
+            <button type="button" onclick="copyToClipboard('\${s.finalAmount}', 'Đã copy \${formatVND(s.finalAmount)}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
               <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-              <span>Copy số tiền</span>
+              <span>Copy số</span>
             </button>
             <button type="button" onclick="copyToClipboard('\${s.bankInfo.account_no}', 'Đã copy SĐT MoMo \${s.bankInfo.account_no}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
               <i data-lucide="phone" class="w-3.5 h-3.5"></i>
@@ -2329,7 +2329,7 @@ app.get('*', async (c) => {
             </button>
           </div>
           <p class="text-[11px] text-slate-400 text-center leading-relaxed pt-1">
-            * Bấm "Mở Ứng Dụng MoMo" sẽ tự động copy số tiền và mở app. Bạn cũng có thể dùng app MoMo hoặc ngân hàng quét mã QR trên để chuyển tiền tự động.
+            * Bấm "Mở Ứng Dụng MoMo" sẽ tự động copy số cần chuyển và mở app. Bạn cũng có thể dùng app MoMo hoặc ngân hàng quét mã QR trên để chuyển khoản tự động.
           </p>
         \`;
       } else {
@@ -2354,20 +2354,20 @@ app.get('*', async (c) => {
               <span class="font-bold text-slate-900">\${s.bankInfo.account_holder || ''}</span>
             </div>
             <div class="flex justify-between items-center py-0.5 border-b border-slate-100">
-              <span class="text-slate-500">Số tiền:</span>
+              <span class="text-slate-500">Tổng phần:</span>
               <span class="font-bold text-brand-600 text-base">\${formatVND(s.finalAmount)}</span>
             </div>
             <div class="flex justify-between items-center py-0.5">
               <span class="text-slate-500">Nội dung:</span>
-              <span class="font-bold text-slate-800">AN TRUA \${s.name}</span>
+              <span class="font-bold text-slate-800">SPLIT \${s.name}</span>
             </div>
           </div>
         \`;
         modalActions.innerHTML = \`
           <div class="grid grid-cols-2 gap-2">
-            <button type="button" onclick="copyToClipboard('\${s.finalAmount}', 'Đã copy số tiền \${formatVND(s.finalAmount)}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
+            <button type="button" onclick="copyToClipboard('\${s.finalAmount}', 'Đã copy \${formatVND(s.finalAmount)}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
               <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-              <span>Copy số tiền</span>
+              <span>Copy số</span>
             </button>
             <button type="button" onclick="copyToClipboard('\${s.bankInfo.account_no}', 'Đã copy STK \${s.bankInfo.account_no}!')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 cursor-pointer transition-colors">
               <i data-lucide="credit-card" class="w-3.5 h-3.5"></i>
@@ -2421,9 +2421,9 @@ app.get('*', async (c) => {
 
     // Copy Zalo / Slack text
     function copyZaloText() {
-      const store = document.getElementById('input-store-name').value || 'Cơm trưa';
+      const store = document.getElementById('input-store-name').value || 'Đơn chung';
       const today = new Date().toLocaleDateString('vi-VN');
-      let text = \`🍱 TIỀN CƠM TRƯA (\${store} - \${today})\\n--------------------------------\\n\`;
+      let text = \`🧾 PHÂN CHIA CHI PHÍ (\${store} - \${today})\\n--------------------------------\\n\`;
 
       currentSettlements.forEach((s, i) => {
         text += \`\${i + 1}. \${s.name}: \${formatVND(s.finalAmount)} (\${s.dishesStr})\\n\`;
@@ -2464,7 +2464,7 @@ app.get('*', async (c) => {
       btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Đang gửi mail qua Gmail...</span>';
       lucide.createIcons();
 
-      const storeName = document.getElementById('input-store-name').value || 'Bữa trưa văn phòng';
+      const storeName = document.getElementById('input-store-name').value || 'Đơn chung';
       const dateStr = new Date().toLocaleDateString('vi-VN');
 
       const payload = {

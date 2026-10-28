@@ -1,13 +1,13 @@
 /**
  * ==============================================================================
- * GOOGLE APPS SCRIPT: LUNCH BILL NOTIFICATION SERVICE (CHỐNG SPAM TỐI ĐA)
+ * GOOGLE APPS SCRIPT: BILL SPLITTER NOTIFICATION SERVICE (CHỐNG SPAM TỐI ĐA)
  * ==============================================================================
- * Dịch vụ gửi email thông báo phần cơm trưa văn phòng trực tiếp từ Gmail cá nhân.
+ * Dịch vụ gửi email thông báo chi tiết phần chia của từng thành viên trực tiếp từ Gmail cá nhân.
  * 
  * CÁC CẢI TIẾN CHỐNG SPAM:
  * 1. Bổ sung nội dung Plain Text (Multipart/alternative) đầy đủ - giải quyết lỗi HTML-only.
  * 2. Tinh chỉnh từ ngữ tự nhiên, loại bỏ các từ khóa kích hoạt bộ lọc lừa đảo hóa đơn (Invoice Phishing).
- * 3. Hỗ trợ tùy chỉnh Tên người gửi (Sender Name) thân thiện (mặc định: Cơm Trưa Đồng Nghiệp hoặc tên bạn).
+ * 3. Hỗ trợ tùy chỉnh Tên người gửi (Sender Name) thân thiện (mặc định: Bill Splitter hoặc tên bạn).
  * 4. Tự động giãn cách thời gian gửi (Rate limiting 800ms) tránh bị nghi ngờ gửi hàng loạt.
  * 
  * HƯỚNG DẪN CẬP NHẬT CHO DỰ ÁN ĐÃ TRIỂN KHAI:
@@ -33,18 +33,18 @@ function doPost(e) {
     if (data.action === "send_otp") {
       var targetEmail = (data.email || "").trim();
       var otpCode = data.otp;
-      var appName = data.sender_name || "Cơm Trưa Đồng Nghiệp";
+      var appName = data.sender_name || "Bill Splitter";
 
       if (!targetEmail || !otpCode) {
         return jsonResponse({ success: false, error: "Thiếu email hoặc mã OTP" }, 400);
       }
 
-      var otpSubject = "Mã xác thực đăng ký tài khoản Cơm Trưa: " + otpCode;
-      var otpPlainText = "Xin chào,\n\nMã xác thực (OTP) để tạo tài khoản Cơm Trưa của bạn là: " + otpCode + "\nMã có hiệu lực trong vòng 5 phút. Vui lòng không chia sẻ mã này cho người khác.\n\nTrân trọng!";
+      var otpSubject = "Mã xác thực tài khoản Bill Splitter: " + otpCode;
+      var otpPlainText = "Xin chào,\n\nMã xác thực (OTP) cho tài khoản Bill Splitter của bạn là: " + otpCode + "\nMã có hiệu lực trong vòng 5 phút. Vui lòng không chia sẻ mã này cho người khác.\n\nTrân trọng!";
       var otpHtml = '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">' +
         '<div style="background: #ea580c; padding: 24px 20px; text-align: center; color: #ffffff;">' +
         '  <h2 style="margin: 0; font-size: 20px; font-weight: bold;">Xác Thực Email Đăng Ký</h2>' +
-        '  <p style="margin: 6px 0 0; opacity: 0.9; font-size: 13px;">Hệ thống chia tiền cơm trưa văn phòng</p>' +
+        '  <p style="margin: 6px 0 0; opacity: 0.9; font-size: 13px;">Bill Splitter — Phân chia chi phí nhóm</p>' +
         '</div>' +
         '<div style="padding: 24px 20px; text-align: center; color: #334155;">' +
         '  <p style="font-size: 14px; margin-top: 0;">Xin chào <b>' + targetEmail + '</b>,</p>' +
@@ -67,10 +67,10 @@ function doPost(e) {
       });
     }
 
-    var storeName = data.store_name || "Bữa trưa văn phòng";
+    var storeName = data.store_name || "Đơn chung";
     var dateStr = data.date || Utilities.formatDate(new Date(), "GMT+7", "dd/MM/yyyy");
     var adminEmail = data.admin_email || "";
-    var senderName = data.sender_name || "Cơm Trưa Đồng Nghiệp";
+    var senderName = data.sender_name || "Bill Splitter";
     var members = data.members || []; // Danh sách từng người
 
     var sentCount = 0;
@@ -85,7 +85,7 @@ function doPost(e) {
 
       var memberName = (m.name || "bạn").trim();
       // Tiêu đề tự nhiên, không dùng thẻ ngoặc vuông [...] hay từ "tiền" để tránh bộ lọc spam
-      var subject = "Bữa trưa " + storeName + " (" + dateStr + ") - " + memberName;
+      var subject = storeName + " (" + dateStr + ") - " + memberName;
       var plainTextBody = buildMemberPlainText(m, storeName, dateStr);
       var htmlBody = buildMemberEmailHtml(m, storeName, dateStr);
 
@@ -104,7 +104,7 @@ function doPost(e) {
 
     // 2. Gửi email tổng hợp cho admin
     if (adminEmail && adminEmail.indexOf("@") !== -1) {
-      var adminSubject = "Tổng hợp bữa trưa " + storeName + " (" + dateStr + ")";
+      var adminSubject = "Bảng tổng hợp " + storeName + " (" + dateStr + ")";
       var adminPlainText = buildAdminPlainText(data, storeName, dateStr);
       var adminHtml = buildAdminEmailHtml(data, storeName, dateStr);
       try {
@@ -154,16 +154,16 @@ function buildMemberPlainText(m, storeName, dateStr) {
   var lines = [
     "Xin chào " + (m.name || "bạn") + ",",
     "",
-    "Dưới đây là chi tiết phần cơm trưa của bạn ngày " + dateStr + " tại " + storeName + ":",
+    "Dưới đây là chi tiết phần của bạn tại " + storeName + " (" + dateStr + "):",
     "----------------------------------------",
-    "- Món ăn: " + (m.dish_name || "Món ăn đã đặt"),
+    "- Mục: " + (m.dish_name || "Mục đã chọn"),
     "- Giá gốc: " + formatVND(m.original_price)
   ];
   if (m.discount) {
-    lines.push("- Voucher giảm giá: -" + formatVND(m.discount));
+    lines.push("- Ưu đãi giảm: -" + formatVND(m.discount));
   }
   if (m.shipping_fee) {
-    lines.push("- Phí ship & phụ phí: +" + formatVND(m.shipping_fee));
+    lines.push("- Phí chia sẻ: +" + formatVND(m.shipping_fee));
   }
   lines.push("----------------------------------------");
   lines.push("TỔNG PHẦN BẠN: " + formatVND(m.final_amount));
@@ -184,12 +184,12 @@ function buildMemberPlainText(m, storeName, dateStr) {
       if (m.bank_info.account_no) lines.push("- Số tài khoản: " + m.bank_info.account_no);
       if (m.bank_info.account_holder) lines.push("- Chủ tài khoản: " + m.bank_info.account_holder);
     }
-    lines.push("- Số tiền: " + formatVND(m.final_amount));
-    lines.push("- Lời nhắn: AN TRUA " + (m.name || ""));
+    lines.push("- Cần chuyển: " + formatVND(m.final_amount));
+    lines.push("- Lời nhắn: SPLIT " + (m.name || ""));
   }
 
   lines.push("");
-  lines.push("Chúc bạn có một bữa trưa ngon miệng!");
+  lines.push("Chúc bạn một ngày làm việc hiệu quả!");
   return lines.join("\n");
 }
 
@@ -197,9 +197,9 @@ function buildAdminPlainText(data, storeName, dateStr) {
   var members = data.members || [];
   var totalAmount = 0;
   var lines = [
-    "BẢNG KÊ TỔNG HỢP BỮA TRƯA",
-    "Quán ăn: " + storeName,
-    "Ngày đặt: " + dateStr,
+    "BẢNG KÊ TỔNG HỢP",
+    "Địa điểm: " + storeName,
+    "Ngày: " + dateStr,
     "----------------------------------------"
   ];
   for (var i = 0; i < members.length; i++) {
@@ -238,7 +238,7 @@ function buildMemberEmailHtml(m, storeName, dateStr) {
       '</a>' +
       '</div>' +
       '<p style="text-align: center; font-size: 12px; color: #64748b; margin: 0 0 16px 0; line-height: 1.4;">' +
-      '* Khi quét mã QR hoặc mở app MoMo, bạn vui lòng nhập số tiền là <b style="color: #d82d8b;">' + formatVND(m.final_amount) + '</b>.' +
+      '* Khi quét mã QR hoặc mở app MoMo, bạn vui lòng nhập số cần chuyển là <b style="color: #d82d8b;">' + formatVND(m.final_amount) + '</b>.' +
       '</p>';
   }
 
@@ -246,7 +246,7 @@ function buildMemberEmailHtml(m, storeName, dateStr) {
   var qrImgTag = "";
   if (m.vietqr_url) {
     var qrHeading = isMomo 
-      ? 'Mã QR MoMo nhận chuyển tiền:'
+      ? 'Mã QR MoMo nhận chuyển khoản:'
       : 'Mã VietQR chuyển khoản nhanh:';
     qrImgTag = '<div style="text-align: center; margin: 20px 0;">' +
       '<p style="font-weight: 600; color: #1e293b; margin-bottom: 8px; font-size: 13px;">' + qrHeading + '</p>' +
@@ -259,12 +259,12 @@ function buildMemberEmailHtml(m, storeName, dateStr) {
   if (m.bank_info) {
     if (isMomo) {
       paymentInfoHtml = '<table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 8px; padding: 14px; margin-top: 15px; font-size: 13px; color: #831843;">' +
-        '<tr><td colspan="2" style="font-weight: bold; padding-bottom: 6px; color: #9d174d;">Thông tin ví nhận tiền:</td></tr>' +
+        '<tr><td colspan="2" style="font-weight: bold; padding-bottom: 6px; color: #9d174d;">Thông tin ví nhận:</td></tr>' +
         '<tr><td style="padding: 3px 0; color: #701a75;">Hình thức:</td><td align="right" style="padding: 3px 0; font-weight: bold;">Ví MoMo</td></tr>' +
         '<tr><td style="padding: 3px 0; color: #701a75;">Số điện thoại ví:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #be185d;">' + (m.bank_info.account_no || "") + '</td></tr>' +
         '<tr><td style="padding: 3px 0; color: #701a75;">Chủ ví:</td><td align="right" style="padding: 3px 0; font-weight: bold;">' + (m.bank_info.account_holder || "") + '</td></tr>' +
-        '<tr><td style="padding: 3px 0; color: #701a75;">Số tiền:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #be185d; font-size: 14px;">' + formatVND(m.final_amount) + '</td></tr>' +
-        '<tr><td style="padding: 3px 0; color: #701a75;">Lời nhắn:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #ea580c;">AN TRUA ' + (m.name || "") + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #701a75;">Cần chuyển:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #be185d; font-size: 14px;">' + formatVND(m.final_amount) + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #701a75;">Lời nhắn:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #ea580c;">SPLIT ' + (m.name || "") + '</td></tr>' +
         '</table>';
     } else {
       paymentInfoHtml = '<table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-top: 15px; font-size: 13px; color: #334155;">' +
@@ -272,8 +272,8 @@ function buildMemberEmailHtml(m, storeName, dateStr) {
         '<tr><td style="padding: 3px 0; color: #64748b;">Ngân hàng thụ hưởng:</td><td align="right" style="padding: 3px 0; font-weight: bold;">' + (m.bank_info.bank_name || m.bank_info.bank_code || m.bank_info.bank || "") + '</td></tr>' +
         '<tr><td style="padding: 3px 0; color: #64748b;">Số tài khoản:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #2563eb;">' + (m.bank_info.account_no || "") + '</td></tr>' +
         '<tr><td style="padding: 3px 0; color: #64748b;">Chủ tài khoản:</td><td align="right" style="padding: 3px 0; font-weight: bold;">' + (m.bank_info.account_holder || "") + '</td></tr>' +
-        '<tr><td style="padding: 3px 0; color: #64748b;">Số tiền:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #ea580c; font-size: 14px;">' + formatVND(m.final_amount) + '</td></tr>' +
-        '<tr><td style="padding: 3px 0; color: #64748b;">Lời nhắn:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #ea580c;">AN TRUA ' + (m.name || "") + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #64748b;">Cần chuyển:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #ea580c; font-size: 14px;">' + formatVND(m.final_amount) + '</td></tr>' +
+        '<tr><td style="padding: 3px 0; color: #64748b;">Lời nhắn:</td><td align="right" style="padding: 3px 0; font-weight: bold; color: #ea580c;">SPLIT ' + (m.name || "") + '</td></tr>' +
         '</table>';
     }
   }
@@ -286,44 +286,44 @@ function buildMemberEmailHtml(m, storeName, dateStr) {
     '    <table width="100%" border="0" cellpadding="0" cellspacing="0" style="max-width: 520px; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); text-align: left;">' +
     '      <tr>' +
     '        <td style="background-color: #ea580c; padding: 24px 20px; color: #ffffff; text-align: center;">' +
-    '          <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; opacity: 0.9; margin-bottom: 4px;">Chi Tiết Bữa Trưa</div>' +
+    '          <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; opacity: 0.9; margin-bottom: 4px;">Chi Tiết Phần Bạn</div>' +
     '          <h1 style="margin: 0; font-size: 20px; font-weight: bold; color: #ffffff;">' + storeName + '</h1>' +
-    '          <p style="margin: 6px 0 0; opacity: 0.95; font-size: 13px;">Ngày đặt: <b>' + dateStr + '</b></p>' +
+    '          <p style="margin: 6px 0 0; opacity: 0.95; font-size: 13px;">Ngày: <b>' + dateStr + '</b></p>' +
     '        </td>' +
     '      </tr>' +
     '      <tr>' +
     '        <td style="padding: 24px 20px;">' +
     '          <p style="font-size: 16px; color: #1e293b; margin-top: 0;">Xin chào <b>' + (m.name || "bạn") + '</b>,</p>' +
-    '          <p style="color: #475569; font-size: 14px; line-height: 1.5; margin-bottom: 16px;">Dưới đây là chi tiết bữa trưa của bạn hôm nay:</p>' +
+    '          <p style="color: #475569; font-size: 14px; line-height: 1.5; margin-bottom: 16px;">Dưới đây là chi tiết phần của bạn:</p>' +
     '          <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #fff7ed; border-left: 4px solid #ea580c; border-radius: 0 8px 8px 0; padding: 14px 16px; margin: 16px 0;">' +
     '            <tr>' +
-    '              <td colspan="2" style="font-weight: bold; color: #9a3412; font-size: 15px; padding-bottom: 8px;">' + (m.dish_name || "Món ăn đã đặt") + '</td>' +
+    '              <td colspan="2" style="font-weight: bold; color: #9a3412; font-size: 15px; padding-bottom: 8px;">' + (m.dish_name || "Mục đã chọn") + '</td>' +
     '            </tr>' +
     '            <tr>' +
-    '              <td style="font-size: 13px; color: #7c2d12; padding: 3px 0;">Giá gốc món ăn:</td>' +
+    '              <td style="font-size: 13px; color: #7c2d12; padding: 3px 0;">Giá gốc:</td>' +
     '              <td align="right" style="font-size: 13px; color: #7c2d12; padding: 3px 0; font-weight: 500;">' + formatVND(m.original_price) + '</td>' +
     '            </tr>' +
     (m.discount ? (
     '            <tr>' +
-    '              <td style="font-size: 13px; color: #16a34a; padding: 3px 0;">Được giảm giá voucher:</td>' +
+    '              <td style="font-size: 13px; color: #16a34a; padding: 3px 0;">Ưu đãi giảm:</td>' +
     '              <td align="right" style="font-size: 13px; color: #16a34a; padding: 3px 0; font-weight: 600;">-' + formatVND(m.discount) + '</td>' +
     '            </tr>'
     ) : '') +
     (m.shipping_fee ? (
     '            <tr>' +
-    '              <td style="font-size: 13px; color: #0284c7; padding: 3px 0;">Phí ship & phụ phí chia đều:</td>' +
+    '              <td style="font-size: 13px; color: #0284c7; padding: 3px 0;">Phí chia sẻ:</td>' +
     '              <td align="right" style="font-size: 13px; color: #0284c7; padding: 3px 0; font-weight: 600;">+' + formatVND(m.shipping_fee) + '</td>' +
     '            </tr>'
     ) : '') +
     '            <tr>' +
-    '              <td style="border-top: 1px dashed #fdba74; margin-top: 8px; padding-top: 10px; font-size: 14px; font-weight: bold; color: #c2410c;">TỔNG PHẦN CỦA BẠN:</td>' +
+    '              <td style="border-top: 1px dashed #fdba74; margin-top: 8px; padding-top: 10px; font-size: 14px; font-weight: bold; color: #c2410c;">TỔNG PHẦN BẠN:</td>' +
     '              <td align="right" style="border-top: 1px dashed #fdba74; margin-top: 8px; padding-top: 10px; font-size: 18px; font-weight: bold; color: #ea580c;">' + formatVND(m.final_amount) + '</td>' +
     '            </tr>' +
     '          </table>' +
     momoButtonHtml +
     qrImgTag +
     paymentInfoHtml +
-    '          <p style="text-align: center; color: #94a3b8; font-size: 12px; margin-top: 24px; margin-bottom: 0;">Chúc bạn có một bữa trưa ngon miệng!</p>' +
+    '          <p style="text-align: center; color: #94a3b8; font-size: 12px; margin-top: 24px; margin-bottom: 0;">Chúc bạn một ngày làm việc hiệu quả!</p>' +
     '        </td>' +
     '      </tr>' +
     '    </table>' +
@@ -356,15 +356,15 @@ function buildAdminEmailHtml(data, storeName, dateStr) {
     '      <tr><td>' +
     '        <div style="border-bottom: 2px solid #f1f5f9; padding-bottom: 16px; margin-bottom: 16px;">' +
     '          <span style="background-color: #ea580c; color: #ffffff; font-size: 11px; font-weight: bold; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">BẢNG KÊ TỔNG HỢP</span>' +
-    '          <h2 style="color: #0f172a; margin: 8px 0 4px 0; font-size: 20px;">Tổng Hợp Bữa Trưa</h2>' +
-    '          <p style="color: #64748b; font-size: 13px; margin: 0;">Quán ăn: <b>' + storeName + '</b> | Ngày: <b>' + dateStr + '</b></p>' +
+    '          <h2 style="color: #0f172a; margin: 8px 0 4px 0; font-size: 20px;">Bảng Tổng Hợp</h2>' +
+    '          <p style="color: #64748b; font-size: 13px; margin: 0;">Địa điểm: <b>' + storeName + '</b> | Ngày: <b>' + dateStr + '</b></p>' +
     '        </div>' +
     '        <table width="100%" border="0" cellpadding="0" cellspacing="0" style="border-collapse: collapse; font-size: 14px;">' +
     '          <thead>' +
     '            <tr style="background-color: #f8fafc; border-bottom: 2px solid #cbd5e1; text-align: left;">' +
     '              <th style="padding: 10px; color: #475569;">Thành viên</th>' +
-    '              <th style="padding: 10px; color: #475569;">Món ăn</th>' +
-    '              <th style="padding: 10px; text-align: right; color: #475569;">Số tiền</th>' +
+    '              <th style="padding: 10px; color: #475569;">Mục</th>' +
+    '              <th style="padding: 10px; text-align: right; color: #475569;">Phần</th>' +
     '            </tr>' +
     '          </thead>' +
     '          <tbody>' + rowsHtml + '</tbody>' +
