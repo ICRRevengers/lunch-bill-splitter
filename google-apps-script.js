@@ -29,6 +29,27 @@ function doPost(e) {
 
     var data = JSON.parse(e.postData.contents);
 
+    // XỬ LÝ GỬI EMAIL THÔNG BÁO CHUNG (VD: OCI / SYSTEM NOTIFICATIONS)
+    if (data.action === "send_raw") {
+      var rawTo = (data.to || "").trim();
+      var rawSubject = (data.subject || "Thông báo hệ thống").trim();
+      var rawBody = data.body || "";
+      var rawSender = data.sender_name || "Poohnie";
+
+      if (!rawTo || !rawBody) {
+        return jsonResponse({ success: false, error: "Thiếu địa chỉ nhận hoặc nội dung" }, 400);
+      }
+
+      GmailApp.sendEmail(rawTo, rawSubject, rawBody, {
+        name: rawSender
+      });
+
+      return jsonResponse({
+        success: true,
+        message: "Đã gửi email thông báo đến " + rawTo
+      });
+    }
+
     // XỬ LÝ GỬI MÃ OTP XÁC THỰC EMAIL
     if (data.action === "send_otp") {
       var targetEmail = (data.email || "").trim();
